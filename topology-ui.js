@@ -54,9 +54,12 @@
             <div class="topo-body" id="topo-body">
                 <!-- Settings Drawer (Toggled by ⚙️) -->
                 <div class="topo-settings-drawer topo-drawer-hidden" id="topo-settings-drawer">
-                    <div class="topo-setting-row">
-                        <label for="topo-tolerance-slider">Dung sai (Tolerance): <b id="topo-tol-val">0.5m</b></label>
-                        <input type="range" id="topo-tolerance-slider" min="0.1" max="5.0" step="0.1" value="0.5">
+                    <div class="topo-setting-row" style="align-items: center; justify-content: space-between;">
+                        <label for="topo-tolerance-input">Dung sai check (m):</label>
+                        <input type="number" id="topo-tolerance-input" min="0.01" max="50.0" step="0.05" value="0.5" style="width:75px; padding:3px 6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:600; text-align:center; color:#0284c7;">
+                    </div>
+                    <div class="topo-setting-row" style="margin-top:2px;">
+                        <input type="range" id="topo-tolerance-slider" min="0.01" max="10.0" step="0.05" value="0.5" style="flex:1;">
                     </div>
                     <div class="topo-setting-row" style="margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px;">
                         <label><b>✏️ Cài Đặt Vẽ Đường:</b></label>
@@ -80,7 +83,7 @@
                         <button class="topo-btn-primary" id="topo-btn-scan">
                             <span>Check Topo</span>
                         </button>
-                        <button class="topo-btn-secondary" id="topo-btn-smart-draw">
+                        <button class="topo-btn-secondary" id="topo-btn-smart-draw" disabled style="opacity: 0.45; cursor: not-allowed;" title="Tính năng đang tạm khóa">
                             <span>Vẽ Đường</span>
                         </button>
                         <button class="topo-btn-secondary" id="topo-btn-area-color">
@@ -199,10 +202,14 @@
             });
         }
 
-        // 4. Tolerance slider
-        if (tolSlider && tolVal) {
+        // 4. Tolerance input & slider synchronization
+        const tolInput = document.getElementById('topo-tolerance-input');
+        if (tolSlider && tolInput) {
             tolSlider.addEventListener('input', (e) => {
-                tolVal.textContent = e.target.value + 'm';
+                tolInput.value = e.target.value;
+            });
+            tolInput.addEventListener('input', (e) => {
+                tolSlider.value = e.target.value;
             });
         }
 
@@ -250,6 +257,7 @@
         // 6. Smart Draw button
         if (smartDrawBtn) {
             smartDrawBtn.addEventListener('click', () => {
+                if (smartDrawBtn.disabled) return;
                 cancelAllInteractiveModes();
                 setActiveModeButton('topo-btn-smart-draw');
                 currentAreaMode = 'smart-draw';
@@ -407,11 +415,12 @@
     // ===== EXECUTE TOPOLOGY SCAN =====
     function executeScan() {
         const scanBtn = document.getElementById('topo-btn-scan');
+        const tolInput = document.getElementById('topo-tolerance-input');
         const tolSlider = document.getElementById('topo-tolerance-slider');
         const statsText = document.getElementById('topo-stats-text');
         const fabBadge = document.getElementById('topo-fab-badge');
 
-        const tolerance = parseFloat(tolSlider.value) || 0.5;
+        const tolerance = parseFloat(tolInput?.value) || parseFloat(tolSlider?.value) || 0.5;
 
         scanBtn.disabled = true;
         scanBtn.innerHTML = `<span>⏳ Đang quét dữ liệu...</span>`;

@@ -88,6 +88,34 @@
         viewport.appendChild(canvas);
         return canvas;
     }
+    // Set of disabled error highlight IDs (tắt sáng từng dây khi click)
+    const disabledHighlightIds = new Set();
+
+    function toggleErrorHighlight(errorId, forceState) {
+        if (!errorId) return false;
+
+        let isDisabled = false;
+        if (typeof forceState === 'boolean') {
+            if (!forceState) disabledHighlightIds.add(errorId);
+            else disabledHighlightIds.delete(errorId);
+            isDisabled = !forceState;
+        } else {
+            if (disabledHighlightIds.has(errorId)) {
+                disabledHighlightIds.delete(errorId);
+                isDisabled = false;
+            } else {
+                disabledHighlightIds.add(errorId);
+                isDisabled = true;
+            }
+        }
+
+        if (isDisabled && activeDuplicateSegment && activeDuplicateSegment.id === errorId) {
+            activeDuplicateSegment = null;
+        }
+
+        updateMarkerPositions();
+        return isDisabled;
+    }
 
     function drawDuplicateHighlightsCanvas() {
         const map = window.__topoMap || findOlMap();
@@ -99,8 +127,13 @@
 
         function drawPolyline(pts, strokeStyle, width, shadowColor, shadowBlur, coreStyle = null, coreWidth = 0) {
             if (!pts || pts.length < 2) return;
-            const pixels = pts.map(p => map.getPixelFromCoordinate(p)).filter(px => px && !isNaN(px[0]) && !isNaN(px[1]));
-            if (pixels.length < 2) return;
+
+            const pixels = [];
+            for (let i = 0; i < pts.length; i++) {
+                const px = map.getPixelFromCoordinate(pts[i]);
+                if (!px || isNaN(px[0]) || isNaN(px[1])) return;
+                pixels.push(px);
+            }
 
             ctx.save();
             ctx.beginPath();
@@ -108,12 +141,12 @@
             for (let i = 1; i < pixels.length; i++) {
                 ctx.lineTo(pixels[i][0], pixels[i][1]);
             }
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
             ctx.lineWidth = width;
             ctx.strokeStyle = strokeStyle;
             ctx.shadowColor = shadowColor;
             ctx.shadowBlur = shadowBlur;
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
             ctx.stroke();
 
             if (coreStyle && coreWidth > 0) {
@@ -125,16 +158,17 @@
             ctx.restore();
         }
 
-        // 1. Vẽ tất cả các line segment/path trùng nét với hiệu ứng sáng chói (Yellow / Orange Neon Glow)
+        // 1. Vẽ tất cả các line segment/path trùng nét (bỏ qua những dây bị tắt sáng)
         if (storedDuplicateSegments && storedDuplicateSegments.length > 0) {
             storedDuplicateSegments.forEach(seg => {
+                if (disabledHighlightIds.has(seg.id)) return;
                 const pts = seg.pathCoords || (seg.p1 && seg.p2 ? [seg.p1, seg.p2] : null);
                 drawPolyline(pts, '#f59e0b', 6, '#ef4444', 12, '#ffff00', 3);
             });
         }
 
-        // 2. Vẽ line trùng đang được chọn (Active Highlight) phát sáng rực rỡ với màu đỏ nhấp nháy
-        if (activeDuplicateSegment) {
+        // 2. Vẽ line trùng đang được chọn (Active Highlight) nếu chưa bị tắt sáng
+        if (activeDuplicateSegment && !disabledHighlightIds.has(activeDuplicateSegment.id)) {
             const pts = activeDuplicateSegment.pathCoords || (activeDuplicateSegment.p1 && activeDuplicateSegment.p2 ? [activeDuplicateSegment.p1, activeDuplicateSegment.p2] : null);
             drawPolyline(pts, '#dc2626', 10, '#ff0055', 24, '#ffffff', 4);
         }
@@ -346,16 +380,109 @@
         return true;
     }
 
+    // ===== SYNC NEW FEATURES TO 3DG.VN REACT STATE & REDUX STORE =====
+    function syncFeatureTo3dgReactState(olFeature, geojsonFeature) {
+        const map = window.__topoMap || findOlMap();
+
+        // 1. Dispatch drawend event on OpenLayers draw interactions
+        if (map) {
+            try {
+                map.getInteractions().forEach(interaction => {
+                    const ctorName = interaction.constructor?.name || '';
+                    if (ctorName.includes('Draw') || typeof interaction.dispatchEvent === 'function') {
+                        try {
+                            interaction.dispatchEvent({ type: 'drawend', feature: olFeature });
+                        } catch (e) {}
+                    }
+                });
+            } catch (e) {}
+        }
+
+        // 2. Traversal of React Fiber tree to update 3dg.vn React state
+        const root = document.getElementById('root') || document.body;
+        const candidates = [root, ...Array.from(document.querySelectorAll('div, section, aside, main, nav'))];
+
+        for (const el of candidates) {
+            const key = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactContainer'));
+            if (!key) continue;
+
+            let node = el[key];
+            for (let depth = 0; depth < 300 && node; depth++) {
+                try {
+                    const props = node.memoizedProps;
+                    if (props) {
+                        if (typeof props.onFeatureAdd === 'function') {
+                            props.onFeatureAdd(olFeature || geojsonFeature);
+                            log('Synced feature via props.onFeatureAdd');
+                        }
+                        if (typeof props.setFeatures === 'function' && Array.isArray(props.features)) {
+                            props.setFeatures(prev => [...prev, geojsonFeature || olFeature]);
+                            log('Synced feature via props.setFeatures');
+                        }
+                    }
+
+                    let s = node.memoizedState;
+                    while (s) {
+                        if (s.queue && typeof s.queue.dispatch === 'function' && Array.isArray(s.memoizedState)) {
+                            const arr = s.memoizedState;
+                            if (arr.length > 0) {
+                                const sample = arr[0];
+                                if (sample && (sample.type === 'Feature' || sample.geometry || sample.coordinates || sample.id)) {
+                                    s.queue.dispatch(prev => {
+                                        if (Array.isArray(prev)) {
+                                            return [...prev, geojsonFeature || olFeature];
+                                        }
+                                        return prev;
+                                    });
+                                    log('Synced feature via React state dispatch!');
+                                }
+                            }
+                        }
+                        s = s.next;
+                    }
+                } catch (e) {}
+                node = node.return;
+            }
+        }
+    }
+
+    // ===== DISABLE DOUBLE CLICK ZOOM & PREVENT DARK MODAL BACKDROP =====
+    function preventDarkModalOnDblClick(map) {
+        if (!map || typeof map.getInteractions !== 'function') return;
+        try {
+            map.getInteractions().forEach(interaction => {
+                const ctorName = interaction.constructor?.name || '';
+                if (ctorName.includes('DoubleClick') || ctorName.includes('DblClick')) {
+                    interaction.setActive(false);
+                }
+            });
+        } catch (e) {}
+
+        const viewport = document.querySelector('.ol-viewport');
+        if (viewport && !viewport.__topoDblClickPrevented) {
+            viewport.__topoDblClickPrevented = true;
+            viewport.addEventListener('dblclick', function (e) {
+                if (!e.target || !e.target.closest('#topo-checker-panel')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+            }, true);
+        }
+    }
+
     // Expose helpers globally
     window.__topoZoomToError = zoomToErrorLocation;
     window.__topoRenderAllOverlays = renderAllErrorOverlays;
     window.__topoClearHighlight = clearAllErrorOverlays;
+    window.__topoSyncFeatureToReactState = syncFeatureTo3dgReactState;
+    window.__topoToggleHighlight = toggleErrorHighlight;
 
     // Auto init check
     (function waitForMap() {
         const map = findOlMap();
         if (map) {
             window.__topoMap = map;
+            preventDarkModalOnDblClick(map);
             log('✅ OpenLayers Map detected and hooked ready!');
             attachMapRenderListeners(map);
             document.dispatchEvent(new CustomEvent('topo:map-ready', { detail: { map } }));

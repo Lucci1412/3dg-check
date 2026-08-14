@@ -79,12 +79,59 @@
         return results;
     }
 
+    // ===== CONSECUTIVE DUPLICATE VERTEX CLEANER =====
+    function sanitizeLineStringCoords(coords) {
+        if (!coords || coords.length < 2) return { cleaned: coords, removedCount: 0 };
+        const cleaned = [coords[0]];
+        let removedCount = 0;
+
+        for (let i = 1; i < coords.length; i++) {
+            const prev = cleaned[cleaned.length - 1];
+            const curr = coords[i];
+            const dx = Math.abs(curr[0] - prev[0]);
+            const dy = Math.abs(curr[1] - prev[1]);
+
+            if (dx <= 1e-6 && dy <= 1e-6) {
+                removedCount++;
+            } else {
+                cleaned.push(curr);
+            }
+        }
+
+        return { cleaned, removedCount };
+    }
+
+    function autoCleanDuplicateVerticesOnMap() {
+        const featureItems = collectAllFeatures();
+        let totalCleanedFeatures = 0;
+        let totalPointsRemoved = 0;
+
+        featureItems.forEach(item => {
+            const geom = item.geometry;
+            if (geom && geom.getType?.() === 'LineString') {
+                const coords = geom.getCoordinates();
+                const { cleaned, removedCount } = sanitizeLineStringCoords(coords);
+
+                if (removedCount > 0) {
+                    geom.setCoordinates(cleaned);
+                    totalCleanedFeatures++;
+                    totalPointsRemoved += removedCount;
+
+                    if (item.source && typeof item.source.changed === 'function') {
+                        item.source.changed();
+                    }
+                }
+            }
+        });
+
+        if (totalCleanedFeatures > 0) {
+            log(`⚡ Automatically deleted ${totalPointsRemoved} consecutive duplicate vertices across ${totalCleanedFeatures} features!`);
+        }
+
+        return { cleanedFeatures: totalCleanedFeatures, pointsRemoved: totalPointsRemoved };
+    }
+
     // ===== MAIN TOPOLOGY SCANNER =====
-    /**
-     * Run full topology check across all features for Dangle / Unclosed Endpoints.
-     * @param {Object} options Options object { tolerance: number }
-     * @returns {Array} List of detected errors
-     */
     function runTopologyCheck(options = {}) {
         const startTime = performance.now();
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
@@ -93,7 +140,9 @@
             return [];
         }
 
-        // Tolerance in map units (default 0.5m or user specified)
+        // Auto clean duplicate consecutive vertices (e.g. vertices 8, 9, 10 having identical coordinates)
+        const cleanResult = autoCleanDuplicateVerticesOnMap();
+
         const tolerance = options.tolerance !== undefined ? Number(options.tolerance) : 0.5;
         const tolSq = tolerance * tolerance;
 
@@ -376,5 +425,6 @@
 
     // Expose engine globally
     window.__topoRunCheck = runTopologyCheck;
+    window.__topoCleanDuplicateVertices = autoCleanDuplicateVerticesOnMap;
 
 })();

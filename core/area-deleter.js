@@ -142,7 +142,37 @@
         ctx.restore();
     }
 
-    // ===== CLICK TO ADD VERTEX POINTS (WITH DRAG DETECTION) =====
+    // ===== DISABLE / RESTORE NATIVE MAP INTERACTIONS =====
+    function disableNativeMapInteractions(map) {
+        if (!map || typeof map.getInteractions !== 'function') return;
+        try {
+            map.getInteractions().forEach(interaction => {
+                if (interaction && typeof interaction.setActive === 'function') {
+                    const name = interaction.constructor?.name || '';
+                    if (name.includes('Draw') || name.includes('Modify') || name.includes('Snap')) {
+                        if (interaction.getActive()) {
+                            interaction.setActive(false);
+                            interaction.__topoDisabled = true;
+                        }
+                    }
+                }
+            });
+        } catch (e) {}
+    }
+
+    function restoreNativeMapInteractions(map) {
+        if (!map || typeof map.getInteractions !== 'function') return;
+        try {
+            map.getInteractions().forEach(interaction => {
+                if (interaction && interaction.__topoDisabled) {
+                    interaction.setActive(true);
+                    delete interaction.__topoDisabled;
+                }
+            });
+        } catch (e) {}
+    }
+
+    // ===== CLICK TO ADD VERTEX POINTS (WITH DRAG DETECTION & PROPAGATION STOP) =====
     let areaMouseDownPos = null;
 
     function isUIElementClick(e) {
@@ -152,11 +182,15 @@
 
     function onAreaMouseDown(e) {
         if (!isSelectingRegion || isUIElementClick(e) || e.button !== 0) return;
+        if (e.stopPropagation) e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
         areaMouseDownPos = { x: e.clientX, y: e.clientY, time: Date.now() };
     }
 
     function onAreaMouseUp(e) {
         if (!isSelectingRegion || !areaMouseDownPos || isUIElementClick(e) || e.button !== 0) return;
+        if (e.stopPropagation) e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
 
         const dx = e.clientX - areaMouseDownPos.x;
         const dy = e.clientY - areaMouseDownPos.y;
@@ -186,15 +220,15 @@
         const canvas = getOrCreateCanvasOverlay();
         if (!canvas) return;
         areaMouseDownPos = null;
-        canvas.addEventListener('mousedown', onAreaMouseDown);
-        canvas.addEventListener('mouseup', onAreaMouseUp);
+        canvas.addEventListener('mousedown', onAreaMouseDown, true);
+        canvas.addEventListener('mouseup', onAreaMouseUp, true);
     }
 
     function detachCanvasMouseEvents() {
         const canvas = document.getElementById('topo-area-draw-canvas');
         if (canvas) {
-            canvas.removeEventListener('mousedown', onAreaMouseDown);
-            canvas.removeEventListener('mouseup', onAreaMouseUp);
+            canvas.removeEventListener('mousedown', onAreaMouseDown, true);
+            canvas.removeEventListener('mouseup', onAreaMouseUp, true);
             canvas.style.pointerEvents = 'none';
         }
     }
@@ -218,6 +252,8 @@
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         if (!map) return false;
 
+        disableNativeMapInteractions(map);
+
         isSelectingRegion = true;
         drawnPoints = [];
         selectedFeatureItems = [];
@@ -235,6 +271,9 @@
     }
 
     function cancelAreaSelection() {
+        const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
+        if (map) restoreNativeMapInteractions(map);
+
         isSelectingRegion = false;
         drawnPoints = [];
         selectedFeatureItems = [];
