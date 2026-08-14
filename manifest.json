@@ -19,6 +19,7 @@
         "core/topo-engine.js",
         "core/area-deleter.js",
         "core/area-colorizer.js",
+        "core/smart-drawer.js",
         "core/topo-ui.js",
         "color.json",
         "styles.css"

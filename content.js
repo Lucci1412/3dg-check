@@ -10,6 +10,7 @@ const scripts = [
     'core/topo-engine.js',
     'core/area-deleter.js',
     'core/area-colorizer.js',
+    'core/smart-drawer.js',
     'core/topo-ui.js'
 ];
 

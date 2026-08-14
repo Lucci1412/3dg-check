@@ -142,14 +142,30 @@
         ctx.restore();
     }
 
-    // ===== CLICK TO ADD VERTEX POINTS =====
+    // ===== CLICK TO ADD VERTEX POINTS (WITH DRAG DETECTION) =====
+    let areaMouseDownPos = null;
+
     function isUIElementClick(e) {
         if (!e || !e.target) return false;
         return !!(e.target.closest('#topo-checker-panel') || e.target.closest('#topo-fab-btn') || e.target.closest('.topo-area-bar'));
     }
 
-    function onCanvasClick(e) {
-        if (!isSelectingRegion || isUIElementClick(e)) return;
+    function onAreaMouseDown(e) {
+        if (!isSelectingRegion || isUIElementClick(e) || e.button !== 0) return;
+        areaMouseDownPos = { x: e.clientX, y: e.clientY, time: Date.now() };
+    }
+
+    function onAreaMouseUp(e) {
+        if (!isSelectingRegion || !areaMouseDownPos || isUIElementClick(e) || e.button !== 0) return;
+
+        const dx = e.clientX - areaMouseDownPos.x;
+        const dy = e.clientY - areaMouseDownPos.y;
+        const dist = Math.hypot(dx, dy);
+        const duration = Date.now() - areaMouseDownPos.time;
+
+        areaMouseDownPos = null;
+
+        if (dist > 6 || duration > 350) return; // Ignores drag/pan
 
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         const canvas = getOrCreateCanvasOverlay();
@@ -169,13 +185,16 @@
     function attachCanvasMouseEvents() {
         const canvas = getOrCreateCanvasOverlay();
         if (!canvas) return;
-        canvas.addEventListener('click', onCanvasClick);
+        areaMouseDownPos = null;
+        canvas.addEventListener('mousedown', onAreaMouseDown);
+        canvas.addEventListener('mouseup', onAreaMouseUp);
     }
 
     function detachCanvasMouseEvents() {
         const canvas = document.getElementById('topo-area-draw-canvas');
         if (canvas) {
-            canvas.removeEventListener('click', onCanvasClick);
+            canvas.removeEventListener('mousedown', onAreaMouseDown);
+            canvas.removeEventListener('mouseup', onAreaMouseUp);
             canvas.style.pointerEvents = 'none';
         }
     }

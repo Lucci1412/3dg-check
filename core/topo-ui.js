@@ -58,6 +58,21 @@
                         <label for="topo-tolerance-slider">Dung sai (Tolerance): <b id="topo-tol-val">${(window.__topoConfig?.defaultTolerance || 0.5)}m</b></label>
                         <input type="range" id="topo-tolerance-slider" min="${(window.__topoConfig?.minTolerance || 0.1)}" max="${(window.__topoConfig?.maxTolerance || 5.0)}" step="${(window.__topoConfig?.toleranceStep || 0.1)}" value="${(window.__topoConfig?.defaultTolerance || 0.5)}">
                     </div>
+                    <div class="topo-setting-row" style="margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px;">
+                        <label><b>✏️ Cài Đặt Vẽ Đường:</b></label>
+                    </div>
+                    <div class="topo-setting-row">
+                        <label for="topo-smart-dist">Khoảng cách lề (m):</label>
+                        <input type="number" id="topo-smart-dist" value="5.0" step="0.5" min="0.5" max="100.0" style="width:65px; padding:2px 6px; border:1px solid #cbd5e1; border-radius:4px;">
+                    </div>
+                    <div class="topo-setting-row">
+                        <label for="topo-smart-side">Hướng sinh đường:</label>
+                        <select id="topo-smart-side" style="padding:2px 6px; border:1px solid #cbd5e1; border-radius:4px;">
+                            <option value="right" selected>Bên Phải</option>
+                            <option value="left">Bên Trái</option>
+                            <option value="both">Cả 2 Bên</option>
+                        </select>
+                    </div>
                 </div>
 
                 <!-- Primary Action Buttons -->
@@ -65,6 +80,9 @@
                     <div class="topo-btn-group">
                         <button class="topo-btn-primary" id="topo-btn-scan">
                             <span>Check Topo</span>
+                        </button>
+                        <button class="topo-btn-secondary" id="topo-btn-smart-draw">
+                            <span>Vẽ Đường</span>
                         </button>
                         <button class="topo-btn-secondary" id="topo-btn-area-color">
                             <span>Đổi Màu Vùng</span>
@@ -146,6 +164,7 @@
         const settingsDrawer = document.getElementById('topo-settings-drawer');
         const body = document.getElementById('topo-body');
         const scanBtn = document.getElementById('topo-btn-scan');
+        const smartDrawBtn = document.getElementById('topo-btn-smart-draw');
         const tolSlider = document.getElementById('topo-tolerance-slider');
         const tolVal = document.getElementById('topo-tol-val');
 
@@ -210,8 +229,8 @@
         let currentAreaMode = 'delete'; // 'delete' or 'color'
 
         function setActiveModeButton(activeId) {
-            if (!scanBtn || !areaColorBtn || !areaDeleteBtn) return;
-            [scanBtn, areaColorBtn, areaDeleteBtn].forEach(btn => {
+            if (!scanBtn || !smartDrawBtn || !areaColorBtn || !areaDeleteBtn) return;
+            [scanBtn, smartDrawBtn, areaColorBtn, areaDeleteBtn].forEach(btn => {
                 if (btn.id === activeId) {
                     btn.classList.remove('topo-btn-secondary');
                     btn.classList.add('topo-btn-primary');
@@ -222,53 +241,105 @@
             });
         }
 
+        function cancelAllInteractiveModes() {
+            if (window.__smartDrawerStop) window.__smartDrawerStop();
+            if (window.__areaDeleterCancel) window.__areaDeleterCancel();
+            if (window.__areaColorizerHidePopover) window.__areaColorizerHidePopover();
+            if (areaBar) areaBar.classList.add('topo-drawer-hidden');
+            currentAreaMode = null;
+        }
+
         // 5. Scan button
         if (scanBtn) {
             scanBtn.addEventListener('click', () => {
+                cancelAllInteractiveModes();
                 setActiveModeButton('topo-btn-scan');
                 executeScan();
+            });
+        }
+
+        // 6. Smart Draw button
+        if (smartDrawBtn) {
+            smartDrawBtn.addEventListener('click', () => {
+                cancelAllInteractiveModes();
+                setActiveModeButton('topo-btn-smart-draw');
+                currentAreaMode = 'smart-draw';
+
+                const distEl = document.getElementById('topo-smart-dist');
+                const sideEl = document.getElementById('topo-smart-side');
+                const dist = distEl ? Number(distEl.value) : 5.0;
+                const side = sideEl ? sideEl.value : 'right';
+
+                const sideLabel = side === 'right' ? 'Bên Phải' : (side === 'left' ? 'Bên Trái' : 'Cả 2 Bên');
+
+                if (window.__smartDrawerStart) {
+                    const ok = window.__smartDrawerStart({ distance: dist, side: side });
+                    if (ok && areaBar) {
+                        areaBar.classList.remove('topo-drawer-hidden');
+                        if (areaStatus) areaStatus.textContent = `✏️ Đang vẽ đường (${dist}m, ${sideLabel})... Click chọn điểm, nhấp đúp để xong.`;
+                        if (areaFinishBtn) {
+                            areaFinishBtn.style.display = 'inline-flex';
+                            areaFinishBtn.textContent = '✓ Hoàn Thành Đường';
+                            areaFinishBtn.disabled = true;
+                        }
+                        if (areaConfirmBtn) areaConfirmBtn.style.display = 'none';
+                    }
+                }
             });
         }
 
         // ===== AREA SELECTION (COLOR vs DELETE) =====
         if (areaColorBtn) {
             areaColorBtn.addEventListener('click', () => {
+                cancelAllInteractiveModes();
                 setActiveModeButton('topo-btn-area-color');
                 currentAreaMode = 'color';
                 if (window.__areaDeleterStart) {
                     const ok = window.__areaDeleterStart();
-                    if (ok) {
+                    if (ok && areaBar) {
                         areaBar.classList.remove('topo-drawer-hidden');
-                        areaStatus.textContent = '🎨 Đang vẽ vùng (Chọn ít nhất 3 điểm)...';
-                        areaFinishBtn.style.display = 'inline-flex';
-                        areaFinishBtn.disabled = true; // Vô hiệu hóa nút hoàn thành khi < 3 điểm
-                        areaConfirmBtn.style.display = 'none';
+                        if (areaStatus) areaStatus.textContent = '🎨 Đang vẽ vùng (Chọn ít nhất 3 điểm)...';
+                        if (areaFinishBtn) {
+                            areaFinishBtn.style.display = 'inline-flex';
+                            areaFinishBtn.textContent = '✓ Hoàn Thành Vùng';
+                            areaFinishBtn.disabled = true;
+                        }
+                        if (areaConfirmBtn) areaConfirmBtn.style.display = 'none';
                     }
                 }
             });
         }
 
-        if (areaDeleteBtn && areaBar) {
+        if (areaDeleteBtn) {
             areaDeleteBtn.addEventListener('click', () => {
+                cancelAllInteractiveModes();
                 setActiveModeButton('topo-btn-area-delete');
                 currentAreaMode = 'delete';
                 if (window.__areaDeleterStart) {
                     const ok = window.__areaDeleterStart();
-                    if (ok) {
+                    if (ok && areaBar) {
                         areaBar.classList.remove('topo-drawer-hidden');
-                        areaStatus.textContent = '📍 Đang vẽ vùng (Chọn ít nhất 3 điểm)...';
-                        areaFinishBtn.style.display = 'inline-flex';
-                        areaFinishBtn.disabled = true; // Vô hiệu hóa nút hoàn thành khi < 3 điểm
-                        areaConfirmBtn.style.display = 'none';
+                        if (areaStatus) areaStatus.textContent = '📍 Đang vẽ vùng (Chọn ít nhất 3 điểm)...';
+                        if (areaFinishBtn) {
+                            areaFinishBtn.style.display = 'inline-flex';
+                            areaFinishBtn.textContent = '✓ Hoàn Thành Vùng';
+                            areaFinishBtn.disabled = true;
+                        }
+                        if (areaConfirmBtn) areaConfirmBtn.style.display = 'none';
                     }
                 }
             });
         }
 
-        // Point added event from area-deleter
+        // Point added event
         document.addEventListener('topo:area-point-added', (e) => {
             const count = e.detail?.count || 0;
             if (areaStatus) {
+                if (currentAreaMode === 'smart-draw') {
+                    areaStatus.textContent = `✏️ Đã chấm ${count} điểm (Nhấp đúp hoặc bấm Hoàn thành)`;
+                    if (areaFinishBtn) areaFinishBtn.disabled = (count < 2);
+                    return;
+                }
                 if (count < 3) {
                     areaStatus.textContent = `📍 Đã chọn ${count} điểm (Cần thêm ${3 - count} điểm)`;
                 } else {
@@ -276,15 +347,21 @@
                 }
             }
             if (areaFinishBtn) {
-                areaFinishBtn.disabled = (count < 3); // Active nút khi >= 3 điểm
+                areaFinishBtn.disabled = (count < 3);
             }
         });
 
-        // Finish Area Selection
+        // Finish Selection or Smart Drawing
         if (areaFinishBtn) {
             areaFinishBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
+                if (currentAreaMode === 'smart-draw') {
+                    if (window.__smartDrawerFinish) window.__smartDrawerFinish();
+                    cancelAllInteractiveModes();
+                    setActiveModeButton('topo-btn-scan');
+                    return;
+                }
                 if (window.__areaDeleterFinish) {
                     const selected = window.__areaDeleterFinish();
                     if (selected && selected.length > 0) {
@@ -329,7 +406,7 @@
             if (sure && window.__areaDeleterDelete) {
                 const deleted = window.__areaDeleterDelete();
                 alert(`✅ Đã xóa thành công ${deleted} đường khỏi bản đồ!`);
-                areaBar.classList.add('topo-drawer-hidden');
+                cancelAllInteractiveModes();
                 setActiveModeButton('topo-btn-scan');
             }
         }
@@ -338,12 +415,10 @@
             areaConfirmBtn.addEventListener('click', handleConfirmAction);
         }
 
-        // Cancel Area Selection
+        // Cancel Area Selection / Drawing Mode
         if (areaCancelBtn) {
             areaCancelBtn.addEventListener('click', () => {
-                if (window.__areaDeleterCancel) window.__areaDeleterCancel();
-                if (window.__areaColorizerHidePopover) window.__areaColorizerHidePopover();
-                areaBar.classList.add('topo-drawer-hidden');
+                cancelAllInteractiveModes();
                 setActiveModeButton('topo-btn-scan');
             });
         }
