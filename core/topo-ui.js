@@ -55,8 +55,8 @@
                 <!-- Settings Drawer (Toggled by ⚙️) -->
                 <div class="topo-settings-drawer topo-drawer-hidden" id="topo-settings-drawer">
                     <div class="topo-setting-row">
-                        <label for="topo-tolerance-slider">Dung sai (Tolerance): <b id="topo-tol-val">0.5m</b></label>
-                        <input type="range" id="topo-tolerance-slider" min="0.1" max="5.0" step="0.1" value="0.5">
+                        <label for="topo-tolerance-slider">Dung sai (Tolerance): <b id="topo-tol-val">${(window.__topoConfig?.defaultTolerance || 0.5)}m</b></label>
+                        <input type="range" id="topo-tolerance-slider" min="${(window.__topoConfig?.minTolerance || 0.1)}" max="${(window.__topoConfig?.maxTolerance || 5.0)}" step="${(window.__topoConfig?.toleranceStep || 0.1)}" value="${(window.__topoConfig?.defaultTolerance || 0.5)}">
                     </div>
                 </div>
 
@@ -64,10 +64,13 @@
                 <div class="topo-controls">
                     <div class="topo-btn-group">
                         <button class="topo-btn-primary" id="topo-btn-scan">
-                            <span>⚡ Check Topo</span>
+                            <span>Check Topo</span>
+                        </button>
+                        <button class="topo-btn-secondary" id="topo-btn-area-color">
+                            <span>Đổi Màu Vùng</span>
                         </button>
                         <button class="topo-btn-secondary" id="topo-btn-area-delete">
-                            <span>🗑️ Xóa Vùng</span>
+                            <span>Xóa Vùng</span>
                         </button>
                     </div>
                 </div>
@@ -146,14 +149,6 @@
         const tolSlider = document.getElementById('topo-tolerance-slider');
         const tolVal = document.getElementById('topo-tol-val');
 
-        // Area Delete elements
-        const areaDeleteBtn = document.getElementById('topo-btn-area-delete');
-        const areaBar = document.getElementById('topo-area-bar');
-        const areaStatus = document.getElementById('topo-area-status');
-        const areaFinishBtn = document.getElementById('topo-btn-area-finish');
-        const areaConfirmBtn = document.getElementById('topo-btn-area-confirm');
-        const areaCancelBtn = document.getElementById('topo-btn-area-cancel');
-
         // 1. Settings button (⚙️)
         if (settingsBtn && settingsDrawer) {
             settingsBtn.addEventListener('click', (e) => {
@@ -210,14 +205,41 @@
             });
         }
 
-        // ===== AREA SELECTION & DELETION EVENTS =====
-        if (areaDeleteBtn && areaBar) {
-            areaDeleteBtn.addEventListener('click', () => {
+        // Area Delete & Color elements
+        const areaColorBtn = document.getElementById('topo-btn-area-color');
+        const areaDeleteBtn = document.getElementById('topo-btn-area-delete');
+        const areaBar = document.getElementById('topo-area-bar');
+        const areaStatus = document.getElementById('topo-area-status');
+        const areaFinishBtn = document.getElementById('topo-btn-area-finish');
+        const areaConfirmBtn = document.getElementById('topo-btn-area-confirm');
+        const areaCancelBtn = document.getElementById('topo-btn-area-cancel');
+
+        let currentAreaMode = 'delete'; // 'delete' or 'color'
+
+        // ===== AREA SELECTION (COLOR vs DELETE) =====
+        if (areaColorBtn) {
+            areaColorBtn.addEventListener('click', () => {
+                currentAreaMode = 'color';
                 if (window.__areaDeleterStart) {
                     const ok = window.__areaDeleterStart();
                     if (ok) {
                         areaBar.classList.remove('topo-drawer-hidden');
-                        areaStatus.textContent = '📍 Đang vẽ vùng...';
+                        areaStatus.textContent = '🎨 Đang vẽ vùng đổi màu...';
+                        areaFinishBtn.style.display = 'inline-flex';
+                        areaConfirmBtn.style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        if (areaDeleteBtn && areaBar) {
+            areaDeleteBtn.addEventListener('click', () => {
+                currentAreaMode = 'delete';
+                if (window.__areaDeleterStart) {
+                    const ok = window.__areaDeleterStart();
+                    if (ok) {
+                        areaBar.classList.remove('topo-drawer-hidden');
+                        areaStatus.textContent = '📍 Đang vẽ vùng xóa...';
                         areaFinishBtn.style.display = 'inline-flex';
                         areaConfirmBtn.style.display = 'none';
                     }
@@ -241,10 +263,22 @@
                 if (window.__areaDeleterFinish) {
                     const selected = window.__areaDeleterFinish();
                     if (selected && selected.length > 0) {
-                        areaStatus.innerHTML = `⚠️ <b style="color:#dc2626">Đã quét thấy ${selected.length} đường</b> trong vùng.`;
-                        areaFinishBtn.style.display = 'none';
-                        areaConfirmBtn.style.display = 'inline-flex';
-                        areaConfirmBtn.textContent = `🗑️ Xóa ${selected.length} đường`;
+                        if (currentAreaMode === 'color') {
+                            areaStatus.innerHTML = `🎨 <b style="color:#0284c7">Đã quét thấy ${selected.length} đường</b>. Chọn màu bên dưới:`;
+                            areaFinishBtn.style.display = 'none';
+                            areaConfirmBtn.style.display = 'inline-flex';
+                            areaConfirmBtn.textContent = `🎨 Chọn Màu (${selected.length} đường)`;
+
+                            // Pop up color tooltip!
+                            if (window.__areaColorizerShowPopover) {
+                                window.__areaColorizerShowPopover(areaFinishBtn);
+                            }
+                        } else {
+                            areaStatus.innerHTML = `⚠️ <b style="color:#dc2626">Đã quét thấy ${selected.length} đường</b> trong vùng.`;
+                            areaFinishBtn.style.display = 'none';
+                            areaConfirmBtn.style.display = 'inline-flex';
+                            areaConfirmBtn.textContent = `🗑️ Xóa ${selected.length} đường`;
+                        }
                     } else {
                         areaStatus.textContent = '❌ Không tìm thấy đường nào trong vùng đã chọn!';
                     }
@@ -252,7 +286,17 @@
             });
         }
 
-        // Confirm Delete Execution
+        // Confirm Action (Delete or Show Color Popover)
+        function handleConfirmAction() {
+            if (currentAreaMode === 'color') {
+                if (window.__areaColorizerShowPopover) {
+                    window.__areaColorizerShowPopover(areaConfirmBtn);
+                }
+            } else {
+                handleConfirmDelete();
+            }
+        }
+
         function handleConfirmDelete() {
             const count = window.__areaDeleterGetSelectedCount ? window.__areaDeleterGetSelectedCount() : 0;
             if (count === 0) return;
@@ -266,13 +310,14 @@
         }
 
         if (areaConfirmBtn) {
-            areaConfirmBtn.addEventListener('click', handleConfirmDelete);
+            areaConfirmBtn.addEventListener('click', handleConfirmAction);
         }
 
         // Cancel Area Selection
         if (areaCancelBtn) {
             areaCancelBtn.addEventListener('click', () => {
                 if (window.__areaDeleterCancel) window.__areaDeleterCancel();
+                if (window.__areaColorizerHidePopover) window.__areaColorizerHidePopover();
                 areaBar.classList.add('topo-drawer-hidden');
             });
         }
@@ -381,7 +426,7 @@
             }
 
             scanBtn.disabled = false;
-            scanBtn.innerHTML = `<span>⚡ Check Topo</span>`;
+            scanBtn.innerHTML = `<span>Check Topo</span>`;
         }, 100);
     }
 
@@ -442,7 +487,7 @@
         document.querySelectorAll('.topo-error-item').forEach(el => el.classList.remove('--active'));
         if (itemElement) itemElement.classList.add('--active');
 
-        const defaultZoom = 21;
+        const defaultZoom = window.__topoConfig?.defaultZoom || 21;
 
         if (window.__topoZoomToError) {
             const ok = window.__topoZoomToError(err.coord, defaultZoom);
@@ -453,6 +498,16 @@
     }
 
     // ===== INIT UI =====
-    setTimeout(createUI, 1000);
+    function initUI() {
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', createUI);
+        } else {
+            createUI();
+        }
+    }
+
+    initUI();
+    setTimeout(createUI, 500);
+    setTimeout(createUI, 1500);
 
 })();

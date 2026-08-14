@@ -1,10 +1,15 @@
 // Content script: Loader cho 3DG Topology Checker Extension
 // Inject CSS và JavaScript các Module vào MAIN world context của trang 3dg.vn
 
+// Lưu Extension Base URL qua DOM data attribute (Tuân thủ CSP 100%, không bị lỗi inline script)
+document.documentElement.setAttribute('data-topo-extension-base-url', chrome.runtime.getURL(''));
+
 const scripts = [
+    'setting.js',
     'core/map-bridge.js',
     'core/topo-engine.js',
     'core/area-deleter.js',
+    'core/area-colorizer.js',
     'core/topo-ui.js'
 ];
 
@@ -26,8 +31,8 @@ function injectNext(index) {
         this.remove();
         injectNext(index + 1);
     };
-    script.onerror = function () {
-        console.error('[TopologyChecker] ❌ FAILED to load Module:', scripts[index]);
+    script.onerror = function (err) {
+        console.error('[TopologyChecker] ❌ FAILED to load Module:', scripts[index], err);
         this.remove();
         injectNext(index + 1);
     };

@@ -332,6 +332,10 @@
     function clearHighlightedFeatures() {
         selectedFeatureItems.forEach(item => {
             try {
+                if (item.isColorApplied) {
+                    // Do not revert style if user applied a new color!
+                    return;
+                }
                 if (item.originalStyle !== undefined) {
                     item.feature.setStyle(item.originalStyle);
                 } else {
@@ -395,5 +399,6 @@
     window.__areaDeleterCancel = cancelAreaSelection;
     window.__areaDeleterDelete = deleteSelectedFeatures;
     window.__areaDeleterGetSelectedCount = () => selectedFeatureItems.length;
+    window.__areaDeleterGetSelectedFeatures = () => selectedFeatureItems;
 
 })();
