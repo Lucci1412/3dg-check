@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "3DG Map Topology Checker",
+  "description": "Tự động kiểm tra lỗi đầu mút hở, đường chưa khép kín thửa đất và chuyển nhanh bản đồ tới vị trí lỗi trên 3dg.vn",
+  "version": "1.0.0",
+  "permissions": [],
+  "content_scripts": [
+    {
+      "matches": ["https://3dg.vn/*", "https://*.3dg.vn/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "core/map-bridge.js",
+        "core/topo-engine.js",
+        "core/topo-ui.js",
+        "styles.css"
+      ],
+      "matches": ["https://3dg.vn/*", "https://*.3dg.vn/*"]
+    }
+  ],
+  "icons": {}
+}

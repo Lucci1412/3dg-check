@@ -1,0 +1,450 @@
+/* ============================================================
+   3DG Topology Checker — Light Gray & White Minimalist Theme
+   - Clean light gray / off-white background
+   - Low border-radius (4px - 6px)
+   - Compact error cards (Lỗi 1, Lỗi 2, Lỗi 3)
+   ============================================================ */
+
+/* Minimalist Magnifying Glass Button (Icon kính lúp, màu xám trắng) */
+.topo-fab {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 44px;
+    height: 44px;
+    border-radius: 6px;
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    color: #1e293b;
+    cursor: grab;
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease, border-color 0.2s ease;
+    user-select: none;
+}
+
+.topo-fab:hover {
+    background: #f1f5f9;
+    border-color: #94a3b8;
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+}
+
+.topo-fab-active {
+    background: #f8fafc !important;
+    border-color: #0284c7 !important;
+}
+
+.topo-fab-icon {
+    font-size: 20px;
+    line-height: 1;
+}
+
+.topo-fab-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: #ef4444;
+    color: #ffffff;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border: 1px solid #ffffff;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Minimalist Light Gray Drawer Panel */
+.topo-panel {
+    position: fixed;
+    bottom: 74px;
+    right: 20px;
+    width: 330px;
+    max-height: calc(85vh - 90px);
+    background: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18);
+    color: #1e293b;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    z-index: 999998;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear;
+}
+
+.topo-panel-hidden {
+    opacity: 0;
+    transform: translateY(10px);
+    pointer-events: none;
+    visibility: hidden;
+}
+
+/* Header */
+.topo-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    background: #f1f5f9;
+    border-bottom: 1px solid #e2e8f0;
+    user-select: none;
+    cursor: grab;
+}
+
+.topo-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 600;
+    font-size: 13px;
+    color: #0f172a;
+}
+
+.topo-icon {
+    font-size: 15px;
+}
+
+.topo-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.topo-btn-icon {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #64748b;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.topo-btn-icon:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+}
+
+.topo-btn-icon.--active {
+    background: #e2e8f0;
+    color: #0284c7;
+    border-color: #cbd5e1;
+}
+
+/* Body & Collapsed State */
+.topo-body {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    overflow: hidden;
+    flex: 1;
+    background: #ffffff;
+    transition: max-height 0.25s ease, padding 0.25s ease, opacity 0.25s ease;
+}
+
+.topo-body.topo-body-collapsed {
+    display: none !important;
+}
+
+/* Settings Drawer (⚙️) */
+.topo-settings-drawer {
+    padding: 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.topo-settings-drawer.topo-drawer-hidden {
+    display: none !important;
+}
+
+.topo-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.topo-setting-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.topo-setting-row label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: #475569;
+}
+
+.topo-setting-row b {
+    color: #0284c7;
+}
+
+.topo-setting-row input[type="range"] {
+    accent-color: #0284c7;
+    cursor: pointer;
+}
+
+.topo-btn-primary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: #0284c7;
+    border: 1px solid #0369a1;
+    border-radius: 4px;
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.topo-btn-primary:hover:not(:disabled) {
+    background: #0369a1;
+}
+
+.topo-btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Stats Container */
+.topo-stats {
+    padding: 8px 10px;
+    background: #f8fafc;
+    border-radius: 4px;
+    border-left: 3px solid #0284c7;
+    border-top: 1px solid #e2e8f0;
+    border-right: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #334155;
+}
+
+.topo-text-success {
+    color: #16a34a;
+}
+
+.topo-text-danger {
+    color: #dc2626;
+}
+
+/* Error List Scroll Area */
+.topo-error-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 300px;
+    overflow-y: auto;
+    padding-right: 2px;
+}
+
+.topo-error-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.topo-error-list::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 2px;
+}
+
+.topo-empty-state {
+    text-align: center;
+    padding: 20px 10px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.topo-empty-state.topo-success {
+    color: #16a34a;
+}
+
+/* Compact Error Item Cards (Chỉ hiển thị Lỗi 1, Lỗi 2, Lỗi 3 + Tọa độ) */
+.topo-error-item {
+    padding: 8px 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.topo-error-item:hover {
+    background: #f1f5f9;
+    border-color: #cbd5e1;
+}
+
+.topo-error-item.--active {
+    background: #e0f2fe;
+    border-color: #0284c7;
+}
+
+.topo-item-title {
+    font-weight: 700;
+    font-size: 12px;
+    color: #dc2626;
+}
+
+.topo-error-item.--active .topo-item-title {
+    color: #0369a1;
+}
+
+.topo-item-coord {
+    color: #64748b;
+    font-size: 11px;
+    font-family: monospace;
+}
+
+/* ===== FLASHING LIGHTBULB MARKERS FOR ALL OPEN ENDPOINTS ===== */
+.topo-marker-bulb-container {
+    position: absolute !important;
+    width: 28px;
+    height: 28px;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    z-index: 9999;
+}
+
+.topo-marker-bulb-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 14px;
+    height: 14px;
+    background: #ff1100;
+    border: 2px solid #ffffff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 10px #ff0000, 0 0 20px #ff0000, 0 0 35px #ff0000;
+    animation: topo-bulb-flash-anim 0.6s infinite alternate cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+.topo-marker-bulb-ring {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 28px;
+    height: 28px;
+    border: 2px solid #ff3300;
+    border-radius: 50%;
+    animation: topo-bulb-ring-expand 1.2s infinite ease-out;
+}
+
+@keyframes topo-bulb-flash-anim {
+    0% {
+        transform: translate(-50%, -50%) scale(0.85);
+        opacity: 0.55;
+        background: #cc0000;
+        box-shadow: 0 0 4px #ff0000, 0 0 8px #ff0000;
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1.35);
+        opacity: 1;
+        background: #ff2200;
+        box-shadow: 0 0 15px #ff0000, 0 0 30px #ff0000, 0 0 45px #ff0000;
+    }
+}
+
+@keyframes topo-bulb-ring-expand {
+    0% {
+        transform: scale(0.4);
+        opacity: 1;
+    }
+    100% {
+        transform: scale(1.7);
+        opacity: 0;
+    }
+}
+
+/* ===== ACTIVE SELECTED ERROR MARKER (HALO RADAR) ===== */
+.topo-marker-active-container {
+    position: absolute !important;
+    width: 50px;
+    height: 50px;
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    z-index: 10000;
+}
+
+.topo-marker-active-dot {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 16px;
+    height: 16px;
+    background: #ff0044;
+    border: 3px solid #ffffff;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    box-shadow: 0 0 20px #ff0044, 0 0 40px #ff0044;
+    animation: topo-active-dot-pulse 0.5s infinite alternate ease-in-out;
+}
+
+.topo-marker-active-ring {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 50px;
+    height: 50px;
+    border: 3px dashed #ff0044;
+    border-radius: 50%;
+    animation: topo-active-ring-rotate 3s linear infinite;
+}
+
+.topo-marker-active-ring-inner {
+    position: absolute;
+    top: 5px;
+    left: 5px;
+    width: 40px;
+    height: 40px;
+    border: 2px solid rgba(255, 0, 68, 0.7);
+    border-radius: 50%;
+    animation: topo-bulb-ring-expand 1s infinite ease-out;
+}
+
+@keyframes topo-active-dot-pulse {
+    0% {
+        transform: translate(-50%, -50%) scale(0.9);
+    }
+    100% {
+        transform: translate(-50%, -50%) scale(1.4);
+    }
+}
+
+@keyframes topo-active-ring-rotate {
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
