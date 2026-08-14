@@ -307,7 +307,7 @@
         }
 
         statsText.innerHTML = `
-            <span class="topo-text-danger">⚠️ Phát hiện <b>${errors.length}</b> vị trí đầu mút bị hở / chưa khép kín</span>
+            <span class="topo-text-danger">⚠️ Phát hiện <b>${errors.length}</b> lỗi khép kín</span>
         `;
 
         listEl.innerHTML = '';
