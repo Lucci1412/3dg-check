@@ -209,13 +209,11 @@
             const pt = v.point;
             let isConnected = false;
 
-            // 1a. Check connection to vertices of OTHER features or OTHER endpoints
             for (const otherV of allVertices) {
                 if (otherV === v) continue;
-                // Exclude self feature endpoint matching itself unless it's a closed ring
                 if (otherV.featureId === v.featureId && otherV.isEndpoint) {
                     if (distSq(pt, otherV.point) < 1e-8) {
-                        isConnected = true; // Closed loop LineString
+                        isConnected = true;
                         break;
                     }
                     continue;
@@ -227,7 +225,6 @@
                 }
             }
 
-            // 1b. Check T-Junction connection: endpoint touching a segment of another feature
             if (!isConnected) {
                 for (const seg of allSegments) {
                     if (seg.featureId === v.featureId) continue;
@@ -238,13 +235,12 @@
                 }
             }
 
-            // If not connected to anything -> UNCLOSED DANGLE ENDPOINT ERROR!
             if (!isConnected) {
                 addError({
                     id: 'err_' + (errors.length + 1),
                     type: 'dangle',
-                    title: 'Đầu mút bị hở / Chưa khép kín',
-                    description: `Line [${v.featureId}] có đầu mút chưa khớp vào thửa đất hoặc đường khác`,
+                    title: 'Chưa khép thửa',
+                    description: `Chưa khép thửa`,
                     coord: pt,
                     featureId: v.featureId,
                     featureItem: v.featureItem,
@@ -253,8 +249,127 @@
             }
         }
 
+        // ===== DUPLICATE SEGMENTS CHECK (Kiểm tra trùng nét vẽ theo đoạn & gộp dải trùng) =====
+        function segmentsOverlap(a1, a2, b1, b2) {
+            const matchSame = (distSq(a1, b1) <= tolSq && distSq(a2, b2) <= tolSq);
+            const matchRev  = (distSq(a1, b2) <= tolSq && distSq(a2, b1) <= tolSq);
+            if (matchSame || matchRev) return true;
+
+            const dA1_B = pointToSegmentDistSq(a1, b1, b2);
+            const dA2_B = pointToSegmentDistSq(a2, b1, b2);
+            if (dA1_B <= tolSq && dA2_B <= tolSq) return true;
+
+            const dB1_A = pointToSegmentDistSq(b1, a1, a2);
+            const dB2_A = pointToSegmentDistSq(b2, a1, a2);
+            if (dB1_A <= tolSq && dB2_A <= tolSq) return true;
+
+            return false;
+        }
+
+        // Lọc các feature trùng khớp 100% hình học để tránh cảnh báo rác do trùng lặp cả đối tượng
+        const uniqueFeatureItems = [];
+        const seenGeomKeys = new Set();
+        for (const item of featureItems) {
+            try {
+                const coords = item.geometry.getCoordinates?.();
+                if (coords) {
+                    const key = JSON.stringify(coords);
+                    if (seenGeomKeys.has(key)) continue;
+                    seenGeomKeys.add(key);
+                }
+            } catch (e) {}
+            uniqueFeatureItems.push(item);
+        }
+
+        const pairMap = new Map();
+
+        for (let i = 0; i < uniqueFeatureItems.length; i++) {
+            const f1 = uniqueFeatureItems[i];
+            const coords1 = f1.geometry.getCoordinates?.() || [];
+            if (!coords1 || coords1.length < 2) continue;
+
+            for (let j = i + 1; j < uniqueFeatureItems.length; j++) {
+                const f2 = uniqueFeatureItems[j];
+                const coords2 = f2.geometry.getCoordinates?.() || [];
+                if (!coords2 || coords2.length < 2) continue;
+
+                const matches = [];
+
+                for (let s1 = 0; s1 < coords1.length - 1; s1++) {
+                    const p1 = coords1[s1];
+                    const p2 = coords1[s1 + 1];
+
+                    for (let s2 = 0; s2 < coords2.length - 1; s2++) {
+                        const q1 = coords2[s2];
+                        const q2 = coords2[s2 + 1];
+
+                        if (segmentsOverlap(p1, p2, q1, q2)) {
+                            matches.push({ s1, s2, p1, p2, q1, q2 });
+                        }
+                    }
+                }
+
+                if (matches.length > 0) {
+                    const pairKey = `${f1.id}___${f2.id}`;
+                    pairMap.set(pairKey, { f1, f2, matches, coords1, coords2 });
+                }
+            }
+        }
+
+        pairMap.forEach(({ f1, f2, matches, coords1, coords2 }) => {
+            const name1 = f1.feature?.get?.('name') || f1.properties?.name || f1.id;
+            const name2 = f2.feature?.get?.('name') || f2.properties?.name || f2.id;
+            const totalV1 = coords1.length;
+            const totalV2 = coords2.length;
+
+            matches.sort((a, b) => a.s1 - b.s1);
+
+            let currentGroup = [matches[0]];
+
+            for (let k = 1; k < matches.length; k++) {
+                const prev = currentGroup[currentGroup.length - 1];
+                const curr = matches[k];
+
+                if (curr.s1 === prev.s1 + 1 && Math.abs(curr.s2 - prev.s2) <= 1) {
+                    currentGroup.push(curr);
+                } else {
+                    addConsolidatedDupError(f1, f2, currentGroup, totalV1, totalV2, name1, name2, coords1);
+                    currentGroup = [curr];
+                }
+            }
+            if (currentGroup.length > 0) {
+                addConsolidatedDupError(f1, f2, currentGroup, totalV1, totalV2, name1, name2, coords1);
+            }
+        });
+
+        function addConsolidatedDupError(f1, f2, group, totalV1, totalV2, name1, name2, coords1) {
+            const firstMatch = group[0];
+            const lastMatch = group[group.length - 1];
+
+            const pathCoords = [];
+            for (let idx = firstMatch.s1; idx <= lastMatch.s1 + 1; idx++) {
+                pathCoords.push(coords1[idx]);
+            }
+
+            const midIdx = Math.floor(pathCoords.length / 2);
+            const centerPt = pathCoords[midIdx] || pathCoords[0];
+
+            addError({
+                id: 'err_dup_' + (errors.length + 1),
+                type: 'duplicate',
+                title: 'Trùng nét',
+                description: 'Trùng nét',
+                coord: centerPt,
+                pathCoords: pathCoords,
+                segment: [firstMatch.p1, lastMatch.p2],
+                featureIds: [f1.id, f2.id],
+                featureItems: [f1, f2],
+                severity: 'high'
+            });
+        }
+
         const endTime = performance.now();
-        log(`Topology check completed in ${(endTime - startTime).toFixed(1)}ms. Found ${errors.length} unclosed dangle errors.`);
+        log(`Topology check completed in ${(endTime - startTime).toFixed(1)}ms. Found ${errors.length} errors.`);
 
         return errors;
     }

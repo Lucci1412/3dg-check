@@ -198,13 +198,6 @@
             });
         }
 
-        // 5. Scan button
-        if (scanBtn) {
-            scanBtn.addEventListener('click', () => {
-                executeScan();
-            });
-        }
-
         // Area Delete & Color elements
         const areaColorBtn = document.getElementById('topo-btn-area-color');
         const areaDeleteBtn = document.getElementById('topo-btn-area-delete');
@@ -216,16 +209,39 @@
 
         let currentAreaMode = 'delete'; // 'delete' or 'color'
 
+        function setActiveModeButton(activeId) {
+            if (!scanBtn || !areaColorBtn || !areaDeleteBtn) return;
+            [scanBtn, areaColorBtn, areaDeleteBtn].forEach(btn => {
+                if (btn.id === activeId) {
+                    btn.classList.remove('topo-btn-secondary');
+                    btn.classList.add('topo-btn-primary');
+                } else {
+                    btn.classList.remove('topo-btn-primary');
+                    btn.classList.add('topo-btn-secondary');
+                }
+            });
+        }
+
+        // 5. Scan button
+        if (scanBtn) {
+            scanBtn.addEventListener('click', () => {
+                setActiveModeButton('topo-btn-scan');
+                executeScan();
+            });
+        }
+
         // ===== AREA SELECTION (COLOR vs DELETE) =====
         if (areaColorBtn) {
             areaColorBtn.addEventListener('click', () => {
+                setActiveModeButton('topo-btn-area-color');
                 currentAreaMode = 'color';
                 if (window.__areaDeleterStart) {
                     const ok = window.__areaDeleterStart();
                     if (ok) {
                         areaBar.classList.remove('topo-drawer-hidden');
-                        areaStatus.textContent = '🎨 Đang vẽ vùng đổi màu...';
+                        areaStatus.textContent = '🎨 Đang vẽ vùng (Chọn ít nhất 3 điểm)...';
                         areaFinishBtn.style.display = 'inline-flex';
+                        areaFinishBtn.disabled = true; // Vô hiệu hóa nút hoàn thành khi < 3 điểm
                         areaConfirmBtn.style.display = 'none';
                     }
                 }
@@ -234,13 +250,15 @@
 
         if (areaDeleteBtn && areaBar) {
             areaDeleteBtn.addEventListener('click', () => {
+                setActiveModeButton('topo-btn-area-delete');
                 currentAreaMode = 'delete';
                 if (window.__areaDeleterStart) {
                     const ok = window.__areaDeleterStart();
                     if (ok) {
                         areaBar.classList.remove('topo-drawer-hidden');
-                        areaStatus.textContent = '📍 Đang vẽ vùng xóa...';
+                        areaStatus.textContent = '📍 Đang vẽ vùng (Chọn ít nhất 3 điểm)...';
                         areaFinishBtn.style.display = 'inline-flex';
+                        areaFinishBtn.disabled = true; // Vô hiệu hóa nút hoàn thành khi < 3 điểm
                         areaConfirmBtn.style.display = 'none';
                     }
                 }
@@ -251,7 +269,14 @@
         document.addEventListener('topo:area-point-added', (e) => {
             const count = e.detail?.count || 0;
             if (areaStatus) {
-                areaStatus.textContent = `📍 Đã chọn ${count} điểm`;
+                if (count < 3) {
+                    areaStatus.textContent = `📍 Đã chọn ${count} điểm (Cần thêm ${3 - count} điểm)`;
+                } else {
+                    areaStatus.textContent = `📍 Đã chọn ${count} điểm (Đủ điều kiện hoàn thành)`;
+                }
+            }
+            if (areaFinishBtn) {
+                areaFinishBtn.disabled = (count < 3); // Active nút khi >= 3 điểm
             }
         });
 
@@ -269,7 +294,6 @@
                             areaConfirmBtn.style.display = 'inline-flex';
                             areaConfirmBtn.textContent = `🎨 Chọn Màu (${selected.length} đường)`;
 
-                            // Pop up color tooltip!
                             if (window.__areaColorizerShowPopover) {
                                 window.__areaColorizerShowPopover(areaFinishBtn);
                             }
@@ -306,6 +330,7 @@
                 const deleted = window.__areaDeleterDelete();
                 alert(`✅ Đã xóa thành công ${deleted} đường khỏi bản đồ!`);
                 areaBar.classList.add('topo-drawer-hidden');
+                setActiveModeButton('topo-btn-scan');
             }
         }
 
@@ -319,6 +344,7 @@
                 if (window.__areaDeleterCancel) window.__areaDeleterCancel();
                 if (window.__areaColorizerHidePopover) window.__areaColorizerHidePopover();
                 areaBar.classList.add('topo-drawer-hidden');
+                setActiveModeButton('topo-btn-scan');
             });
         }
 
@@ -439,10 +465,10 @@
         if (statsEl) statsEl.style.display = 'block';
 
         if (!errors || errors.length === 0) {
-            statsText.innerHTML = `<span class="topo-text-success">✅ Không có lỗi. Tất cả ranh giới khép kín.</span>`;
+            statsText.innerHTML = `<span class="topo-text-success">✅ Không có lỗi topology (Khép kín, không trùng nét).</span>`;
             listEl.innerHTML = `
                 <div class="topo-empty-state topo-success">
-                    Không phát hiện vị trí hở ranh giới.
+                    Không phát hiện vị trí hở ranh giới hoặc trùng nét vẽ.
                 </div>
             `;
             if (window.__topoClearHighlight) window.__topoClearHighlight();
@@ -453,8 +479,15 @@
             window.__topoRenderAllOverlays(errors);
         }
 
+        const dangleCount = errors.filter(e => e.type === 'dangle').length;
+        const dupCount = errors.filter(e => e.type === 'duplicate').length;
+
+        let summaryParts = [];
+        if (dangleCount > 0) summaryParts.push(`<b>${dangleCount}</b> hở ranh giới`);
+        if (dupCount > 0) summaryParts.push(`<b>${dupCount}</b> trùng nét`);
+
         statsText.innerHTML = `
-            <span class="topo-text-danger">⚠️ Phát hiện <b>${errors.length}</b> lỗi khép kín</span>
+            <span class="topo-text-danger">⚠️ Phát hiện <b>${errors.length}</b> lỗi (${summaryParts.join(', ')})</span>
         `;
 
         listEl.innerHTML = '';
@@ -462,15 +495,23 @@
         errors.forEach((err, idx) => {
             const item = document.createElement('div');
             item.className = 'topo-error-item';
+            if (err.type === 'duplicate') item.classList.add('--duplicate');
             if (err.id === activeErrorId) item.classList.add('--active');
 
             const x = err.coord[0].toFixed(2);
             const y = err.coord[1].toFixed(2);
 
-            item.innerHTML = `
-                <div class="topo-item-title">🔴 Lỗi ${idx + 1}</div>
-                <div class="topo-item-coord">Tọa độ: [${x}, ${y}]</div>
-            `;
+            if (err.type === 'duplicate') {
+                item.innerHTML = `
+                    <div class="topo-item-title topo-title-dup">🟧 Lỗi ${idx + 1}: Trùng nét</div>
+                    <div class="topo-item-coord">Tọa độ: [${x}, ${y}]</div>
+                `;
+            } else {
+                item.innerHTML = `
+                    <div class="topo-item-title">🔴 Lỗi ${idx + 1}: Chưa khép thửa</div>
+                    <div class="topo-item-coord">Tọa độ: [${x}, ${y}]</div>
+                `;
+            }
 
             item.addEventListener('click', () => {
                 selectAndZoomError(err, item);
@@ -490,9 +531,9 @@
         const defaultZoom = window.__topoConfig?.defaultZoom || 21;
 
         if (window.__topoZoomToError) {
-            const ok = window.__topoZoomToError(err.coord, defaultZoom);
+            const ok = window.__topoZoomToError(err.coord, defaultZoom, err);
             if (ok) {
-                console.log(`[TopologyUI] 🎯 Zoomed to error at [${err.coord[0]}, ${err.coord[1]}] (Zoom: ${defaultZoom})`);
+                console.log(`[TopologyUI] 🎯 Zoomed to error at [${err.coord[0]}, ${err.coord[1]}] (${err.type}, Zoom: ${defaultZoom})`);
             }
         }
     }
