@@ -3,6 +3,7 @@
 // - Floating Magnifying Glass Icon Button (Draggable)
 // - Minimalist Light Gray Panel with ⚙️ Settings, — Minimize, ✕ Close
 // - "Check Topo" scan action button
+// - "Xóa Theo Vùng" interactive polygon area deletion button
 // ============================================================
 
 (function () {
@@ -59,19 +60,35 @@
                     </div>
                 </div>
 
+                <!-- Primary Action Buttons -->
                 <div class="topo-controls">
-                    <button class="topo-btn-primary" id="topo-btn-scan">
-                        <span>⚡ Check Topo</span>
-                    </button>
+                    <div class="topo-btn-group">
+                        <button class="topo-btn-primary" id="topo-btn-scan">
+                            <span>⚡ Check Topo</span>
+                        </button>
+                        <button class="topo-btn-secondary" id="topo-btn-area-delete">
+                            <span>🗑️ Xóa Vùng</span>
+                        </button>
+                    </div>
                 </div>
 
-                <div class="topo-stats" id="topo-stats">
-                    <span id="topo-stats-text">Bấm "Check Topo" để kiểm tra bản đồ.</span>
+                <!-- Area Selection Active Bar -->
+                <div class="topo-area-bar topo-drawer-hidden" id="topo-area-bar">
+                    <div class="topo-area-status" id="topo-area-status">📍 Đang vẽ vùng...</div>
+                    <div class="topo-area-actions">
+                        <button class="topo-btn-sm topo-btn-primary" id="topo-btn-area-finish">✓ Hoàn Thành Vùng</button>
+                        <button class="topo-btn-sm topo-btn-danger" id="topo-btn-area-confirm" style="display:none">🗑️ Xóa các đường</button>
+                        <button class="topo-btn-sm topo-btn-cancel" id="topo-btn-area-cancel">✕ Hủy</button>
+                    </div>
+                </div>
+
+                <div class="topo-stats" id="topo-stats" style="display:none">
+                    <span id="topo-stats-text"></span>
                 </div>
 
                 <div class="topo-error-list" id="topo-error-list">
                     <div class="topo-empty-state">
-                        Chưa có danh sách lỗi. Bấm "Check Topo" để kiểm tra.
+                        Chưa có danh sách lỗi.
                     </div>
                 </div>
             </div>
@@ -129,6 +146,15 @@
         const tolSlider = document.getElementById('topo-tolerance-slider');
         const tolVal = document.getElementById('topo-tol-val');
 
+        // Area Delete elements
+        const areaDeleteBtn = document.getElementById('topo-btn-area-delete');
+        const areaBar = document.getElementById('topo-area-bar');
+        const areaStatus = document.getElementById('topo-area-status');
+        const areaFinishBtn = document.getElementById('topo-btn-area-finish');
+        const areaConfirmBtn = document.getElementById('topo-btn-area-confirm');
+        const areaCancelBtn = document.getElementById('topo-btn-area-cancel');
+
+        // 1. Settings button (⚙️)
         if (settingsBtn && settingsDrawer) {
             settingsBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -143,6 +169,7 @@
             });
         }
 
+        // 2. Minimize button (—)
         if (minimizeBtn && body) {
             minimizeBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -159,6 +186,7 @@
             });
         }
 
+        // 3. Close button (✕)
         if (closeBtn) {
             closeBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -168,20 +196,100 @@
             });
         }
 
+        // 4. Tolerance slider
         if (tolSlider && tolVal) {
             tolSlider.addEventListener('input', (e) => {
                 tolVal.textContent = e.target.value + 'm';
             });
         }
 
+        // 5. Scan button
         if (scanBtn) {
             scanBtn.addEventListener('click', () => {
                 executeScan();
             });
         }
+
+        // ===== AREA SELECTION & DELETION EVENTS =====
+        if (areaDeleteBtn && areaBar) {
+            areaDeleteBtn.addEventListener('click', () => {
+                if (window.__areaDeleterStart) {
+                    const ok = window.__areaDeleterStart();
+                    if (ok) {
+                        areaBar.classList.remove('topo-drawer-hidden');
+                        areaStatus.textContent = '📍 Đang vẽ vùng...';
+                        areaFinishBtn.style.display = 'inline-flex';
+                        areaConfirmBtn.style.display = 'none';
+                    }
+                }
+            });
+        }
+
+        // Point added event from area-deleter
+        document.addEventListener('topo:area-point-added', (e) => {
+            const count = e.detail?.count || 0;
+            if (areaStatus) {
+                areaStatus.textContent = `📍 Đã chọn ${count} điểm`;
+            }
+        });
+
+        // Finish Area Selection
+        if (areaFinishBtn) {
+            areaFinishBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (window.__areaDeleterFinish) {
+                    const selected = window.__areaDeleterFinish();
+                    if (selected && selected.length > 0) {
+                        areaStatus.innerHTML = `⚠️ <b style="color:#dc2626">Đã quét thấy ${selected.length} đường</b> trong vùng.`;
+                        areaFinishBtn.style.display = 'none';
+                        areaConfirmBtn.style.display = 'inline-flex';
+                        areaConfirmBtn.textContent = `🗑️ Xóa ${selected.length} đường`;
+                    } else {
+                        areaStatus.textContent = '❌ Không tìm thấy đường nào trong vùng đã chọn!';
+                    }
+                }
+            });
+        }
+
+        // Confirm Delete Execution
+        function handleConfirmDelete() {
+            const count = window.__areaDeleterGetSelectedCount ? window.__areaDeleterGetSelectedCount() : 0;
+            if (count === 0) return;
+
+            const sure = confirm(`Bạn có chắc chắn muốn XÓA VĨNH VIỄN ${count} đường/ranh giới trong vùng đã chọn không?`);
+            if (sure && window.__areaDeleterDelete) {
+                const deleted = window.__areaDeleterDelete();
+                alert(`✅ Đã xóa thành công ${deleted} đường khỏi bản đồ!`);
+                areaBar.classList.add('topo-drawer-hidden');
+            }
+        }
+
+        if (areaConfirmBtn) {
+            areaConfirmBtn.addEventListener('click', handleConfirmDelete);
+        }
+
+        // Cancel Area Selection
+        if (areaCancelBtn) {
+            areaCancelBtn.addEventListener('click', () => {
+                if (window.__areaDeleterCancel) window.__areaDeleterCancel();
+                areaBar.classList.add('topo-drawer-hidden');
+            });
+        }
+
+        // Keyboard "Delete" or "Backspace" shortcut for deletion confirmation
+        document.addEventListener('keydown', (e) => {
+            if ((e.key === 'Delete' || e.key === 'Backspace') && !e.target.matches('input, textarea')) {
+                const count = window.__areaDeleterGetSelectedCount ? window.__areaDeleterGetSelectedCount() : 0;
+                if (count > 0) {
+                    e.preventDefault();
+                    handleConfirmDelete();
+                }
+            }
+        });
     }
 
-    // ===== DRAGGABLE HELPER FOR BUTTON & PANEL =====
+    // ===== DRAGGABLE HELPER =====
     function makeDraggable(element, handle, isFab = false) {
         let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
         let startX = 0, startY = 0;
@@ -281,6 +389,9 @@
     function renderErrorList(errors) {
         const listEl = document.getElementById('topo-error-list');
         const statsText = document.getElementById('topo-stats-text');
+        const statsEl = document.getElementById('topo-stats');
+
+        if (statsEl) statsEl.style.display = 'block';
 
         if (!errors || errors.length === 0) {
             statsText.innerHTML = `<span class="topo-text-success">✅ Không có lỗi. Tất cả ranh giới khép kín.</span>`;

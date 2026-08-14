@@ -3,6 +3,7 @@
    - Clean light gray / off-white background
    - Low border-radius (4px - 6px)
    - Compact error cards (Lỗi 1, Lỗi 2, Lỗi 3)
+   - Area Selection & Deletion controls
    ============================================================ */
 
 /* Minimalist Magnifying Glass Button (Icon kính lúp, màu xám trắng) */
@@ -66,7 +67,7 @@
     position: fixed;
     bottom: 74px;
     right: 20px;
-    width: 330px;
+    width: 340px;
     max-height: calc(85vh - 90px);
     background: #ffffff;
     border: 1px solid #cbd5e1;
@@ -185,6 +186,11 @@
     gap: 8px;
 }
 
+.topo-btn-group {
+    display: flex;
+    gap: 8px;
+}
+
 .topo-setting-row {
     display: flex;
     flex-direction: column;
@@ -208,11 +214,12 @@
 }
 
 .topo-btn-primary {
+    flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 6px;
-    padding: 8px 14px;
+    padding: 8px 10px;
     background: #0284c7;
     border: 1px solid #0369a1;
     border-radius: 4px;
@@ -230,6 +237,86 @@
 .topo-btn-primary:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+.topo-btn-secondary {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 4px;
+    color: #334155;
+    font-weight: 600;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.topo-btn-secondary:hover {
+    background: #e2e8f0;
+    color: #0f172a;
+    border-color: #94a3b8;
+}
+
+/* Area Selection Active Bar */
+.topo-area-bar {
+    padding: 10px;
+    background: #f0f9ff;
+    border: 1px solid #bae6fd;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.topo-area-bar.topo-drawer-hidden {
+    display: none !important;
+}
+
+.topo-area-status {
+    font-size: 12px;
+    color: #0369a1;
+    line-height: 1.4;
+}
+
+.topo-area-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.topo-btn-sm {
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.topo-btn-danger {
+    background: #dc2626;
+    color: #ffffff;
+    border-color: #b91c1c;
+}
+
+.topo-btn-danger:hover {
+    background: #b91c1c;
+}
+
+.topo-btn-cancel {
+    background: #ffffff;
+    color: #64748b;
+    border-color: #cbd5e1;
+}
+
+.topo-btn-cancel:hover {
+    background: #f1f5f9;
+    color: #1e293b;
 }
 
 /* Stats Container */

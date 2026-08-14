@@ -4,6 +4,7 @@
 const scripts = [
     'core/map-bridge.js',
     'core/topo-engine.js',
+    'core/area-deleter.js',
     'core/topo-ui.js'
 ];
 
