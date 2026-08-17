@@ -1,14 +1,13 @@
 // ============================================================
-// 3DG Topology Checker — Core Algorithm Engine Module
-// Accurate Dangle / Unclosed Boundary Checker for 2000+ lines:
-// - Detects open endpoints that fail to snap to any vertex or segment
+// 3DG Topology Checker — Feature Module 1: Check Topo
+// Accurate Dangle / Unclosed Boundary & Duplicate Line Checker
 // ============================================================
 
 (function () {
     'use strict';
 
     function log(...args) {
-        console.log('[TopologyEngine]', ...args);
+        console.log('[CheckTopoFeature]', ...args);
     }
 
     // ===== SPATIAL UTILITIES =====
@@ -132,13 +131,11 @@
         const startTime = performance.now();
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         if (!map) {
-            console.error('[TopologyEngine] Map instance not found!');
+            console.error('[CheckTopoFeature] Map instance not found!');
             return [];
         }
 
-        // Auto clean duplicate consecutive vertices (e.g. vertices 8, 9, 10 having identical coordinates)
         const cleanResult = autoCleanDuplicateVerticesOnMap();
-
         const tolerance = options.tolerance !== undefined ? Number(options.tolerance) : 0.5;
         const tolSq = tolerance * tolerance;
 
@@ -246,7 +243,7 @@
             errors.push(errorObj);
         }
 
-        // ===== DANGLE ENDPOINTS CHECK (Chỉ kiểm tra các đầu mút chưa khép kín) =====
+        // Dangle endpoints check
         for (const v of allVertices) {
             if (!v.isEndpoint) continue;
 
@@ -293,7 +290,7 @@
             }
         }
 
-        // ===== DUPLICATE SEGMENTS CHECK (Kiểm tra trùng nét vẽ theo đoạn & gộp dải trùng) =====
+        // Duplicate segments check
         function segmentsOverlap(a1, a2, b1, b2) {
             const matchSame = (distSq(a1, b1) <= tolSq && distSq(a2, b2) <= tolSq);
             const matchRev  = (distSq(a1, b2) <= tolSq && distSq(a2, b1) <= tolSq);
@@ -310,7 +307,6 @@
             return false;
         }
 
-        // Lọc các feature trùng khớp 100% hình học để tránh cảnh báo rác do trùng lặp cả đối tượng
         const uniqueFeatureItems = [];
         const seenGeomKeys = new Set();
         for (const item of featureItems) {
@@ -377,40 +373,90 @@
                 if (curr.s1 === prev.s1 + 1 && Math.abs(curr.s2 - prev.s2) <= 1) {
                     currentGroup.push(curr);
                 } else {
-                    addConsolidatedDupError(f1, f2, currentGroup, totalV1, totalV2, name1, name2, coords1);
+                    addConsolidatedDupError(f1, f2, currentGroup, totalV1, totalV2, name1, name2, coords1, coords2);
                     currentGroup = [curr];
                 }
             }
             if (currentGroup.length > 0) {
-                addConsolidatedDupError(f1, f2, currentGroup, totalV1, totalV2, name1, name2, coords1);
+                addConsolidatedDupError(f1, f2, currentGroup, totalV1, totalV2, name1, name2, coords1, coords2);
             }
         });
 
-        function addConsolidatedDupError(f1, f2, group, totalV1, totalV2, name1, name2, coords1) {
-            const firstMatch = group[0];
-            const lastMatch = group[group.length - 1];
+        function getLineLength(coords) {
+            if (!coords || coords.length < 2) return 0;
+            let len = 0;
+            for (let i = 0; i < coords.length - 1; i++) {
+                if (coords[i] && coords[i + 1]) {
+                    len += Math.hypot(coords[i + 1][0] - coords[i][0], coords[i + 1][1] - coords[i][1]);
+                }
+            }
+            return len;
+        }
+
+        function addConsolidatedDupError(f1, f2, group, totalV1, totalV2, name1, name2, coords1, coords2) {
+            const len1 = getLineLength(coords1);
+            const len2 = getLineLength(coords2);
+
+            // Ưu tiên dùng đường NGẮN HƠN để lấy tọa độ & 2 đầu mút
+            const useCoords2 = (len2 < len1);
+            const targetCoords = useCoords2 ? coords2 : coords1;
+
+            let startIdx, endIdx;
+            if (useCoords2) {
+                const s2List = group.map(m => m.s2);
+                startIdx = Math.min(...s2List);
+                endIdx = Math.max(...s2List) + 1;
+            } else {
+                const s1List = group.map(m => m.s1);
+                startIdx = Math.min(...s1List);
+                endIdx = Math.max(...s1List) + 1;
+            }
+
+            startIdx = Math.max(0, Math.min(startIdx, targetCoords.length - 1));
+            endIdx = Math.max(startIdx + 1, Math.min(endIdx, targetCoords.length - 1));
 
             const pathCoords = [];
-            for (let idx = firstMatch.s1; idx <= lastMatch.s1 + 1; idx++) {
-                pathCoords.push(coords1[idx]);
+            for (let idx = startIdx; idx <= endIdx; idx++) {
+                if (targetCoords[idx]) {
+                    pathCoords.push(targetCoords[idx]);
+                }
+            }
+
+            if (pathCoords.length < 2 && targetCoords.length >= 2) {
+                pathCoords.push(targetCoords[0], targetCoords[targetCoords.length - 1]);
             }
 
             const midIdx = Math.floor(pathCoords.length / 2);
             const centerPt = pathCoords[midIdx] || pathCoords[0];
 
+            let segLen = getLineLength(pathCoords);
+            const shorterFeature = len2 < len1 ? f2 : f1;
+
             addError({
                 id: 'err_dup_' + (errors.length + 1),
                 type: 'duplicate',
                 title: 'Trùng nét',
-                description: 'Trùng nét',
+                description: `Trùng nét (${segLen < 1000 ? segLen.toFixed(1) + 'm' : (segLen / 1000).toFixed(2) + 'km'}) - ${shorterFeature.feature?.get?.('name') || shorterFeature.properties?.name || shorterFeature.id}`,
                 coord: centerPt,
                 pathCoords: pathCoords,
-                segment: [firstMatch.p1, lastMatch.p2],
+                segment: [pathCoords[0], pathCoords[pathCoords.length - 1]],
                 featureIds: [f1.id, f2.id],
+                shorterFeatureId: shorterFeature.id,
                 featureItems: [f1, f2],
+                length: segLen,
                 severity: 'high'
             });
         }
+
+        // Sắp xếp danh sách lỗi: Ưu tiên các đoạn trùng nét ngắn lên trước!
+        errors.sort((a, b) => {
+            if (a.type === 'duplicate' && b.type === 'duplicate') {
+                return (a.length || 0) - (b.length || 0); // Ngắn xếp trước
+            }
+            if (a.type === 'duplicate') return -1;
+            if (b.type === 'duplicate') return 1;
+            return 0;
+        });
 
         const endTime = performance.now();
         log(`Topology check completed in ${(endTime - startTime).toFixed(1)}ms. Found ${errors.length} errors.`);

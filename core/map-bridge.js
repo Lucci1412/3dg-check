@@ -125,52 +125,53 @@
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        function drawPolyline(pts, strokeStyle, width, shadowColor, shadowBlur, coreStyle = null, coreWidth = 0) {
-            if (!pts || pts.length < 2) return;
-
-            const pixels = [];
-            for (let i = 0; i < pts.length; i++) {
-                const px = map.getPixelFromCoordinate(pts[i]);
-                if (!px || isNaN(px[0]) || isNaN(px[1])) return;
-                pixels.push(px);
-            }
+        function drawEndpointGlowingDot(pt, colorRing, colorDot, isLarge = false) {
+            if (!pt) return;
+            const px = map.getPixelFromCoordinate(pt);
+            if (!px || isNaN(px[0]) || isNaN(px[1])) return;
 
             ctx.save();
             ctx.beginPath();
-            ctx.moveTo(pixels[0][0], pixels[0][1]);
-            for (let i = 1; i < pixels.length; i++) {
-                ctx.lineTo(pixels[i][0], pixels[i][1]);
-            }
-            ctx.lineCap = 'round';
-            ctx.lineJoin = 'round';
-            ctx.lineWidth = width;
-            ctx.strokeStyle = strokeStyle;
-            ctx.shadowColor = shadowColor;
-            ctx.shadowBlur = shadowBlur;
-            ctx.stroke();
+            ctx.arc(px[0], px[1], isLarge ? 14 : 9, 0, Math.PI * 2);
+            ctx.fillStyle = colorRing;
+            ctx.shadowColor = colorRing;
+            ctx.shadowBlur = isLarge ? 18 : 12;
+            ctx.fill();
 
-            if (coreStyle && coreWidth > 0) {
-                ctx.lineWidth = coreWidth;
-                ctx.strokeStyle = coreStyle;
-                ctx.shadowBlur = 0;
-                ctx.stroke();
-            }
+            ctx.beginPath();
+            ctx.arc(px[0], px[1], isLarge ? 6 : 4, 0, Math.PI * 2);
+            ctx.fillStyle = colorDot;
+            ctx.shadowBlur = 0;
+            ctx.fill();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
             ctx.restore();
         }
 
-        // 1. Vẽ tất cả các line segment/path trùng nét (bỏ qua những dây bị tắt sáng)
+        // 1. Chỉ làm sáng ở 2 đầu mút của các đoạn trùng nét (Ưu tiên làm sáng đoạn ngắn hơn trên cùng)
         if (storedDuplicateSegments && storedDuplicateSegments.length > 0) {
-            storedDuplicateSegments.forEach(seg => {
+            // Sắp xếp dài trước -> ngắn sau để các đoạn ngắn được vẽ đè lên trên cùng!
+            const sortedSegs = [...storedDuplicateSegments].sort((a, b) => (b.length || 0) - (a.length || 0));
+
+            sortedSegs.forEach(seg => {
                 if (disabledHighlightIds.has(seg.id)) return;
                 const pts = seg.pathCoords || (seg.p1 && seg.p2 ? [seg.p1, seg.p2] : null);
-                drawPolyline(pts, '#f59e0b', 6, '#ef4444', 12, '#ffff00', 3);
+                if (pts && pts.length >= 2) {
+                    const isShort = (seg.length || 0) < 30; // Đoạn ngắn dưới 30m phát sáng nổi bật hơn
+                    drawEndpointGlowingDot(pts[0], isShort ? 'rgba(234, 88, 12, 0.95)' : 'rgba(245, 158, 11, 0.85)', isShort ? '#ffed4a' : '#fbbf24', isShort);
+                    drawEndpointGlowingDot(pts[pts.length - 1], isShort ? 'rgba(234, 88, 12, 0.95)' : 'rgba(245, 158, 11, 0.85)', isShort ? '#ffed4a' : '#fbbf24', isShort);
+                }
             });
         }
 
-        // 2. Vẽ line trùng đang được chọn (Active Highlight) nếu chưa bị tắt sáng
+        // 2. Làm sáng 2 đầu mút của đoạn trùng đang được chọn trong danh sách lỗi
         if (activeDuplicateSegment && !disabledHighlightIds.has(activeDuplicateSegment.id)) {
             const pts = activeDuplicateSegment.pathCoords || (activeDuplicateSegment.p1 && activeDuplicateSegment.p2 ? [activeDuplicateSegment.p1, activeDuplicateSegment.p2] : null);
-            drawPolyline(pts, '#dc2626', 10, '#ff0055', 24, '#ffffff', 4);
+            if (pts && pts.length >= 2) {
+                drawEndpointGlowingDot(pts[0], 'rgba(239, 68, 68, 0.95)', '#ffffff', true);
+                drawEndpointGlowingDot(pts[pts.length - 1], 'rgba(239, 68, 68, 0.95)', '#ffffff', true);
+            }
         }
     }
 
@@ -264,7 +265,8 @@
                     p1: err.segment ? err.segment[0] : err.coord,
                     p2: err.segment ? err.segment[1] : err.coord,
                     pathCoords: err.pathCoords || err.segment,
-                    id: err.id
+                    id: err.id,
+                    length: err.length || 0
                 });
             }
 
@@ -347,7 +349,7 @@
     }
 
     // ===== NAVIGATE & ZOOM TO ERROR LOCATION =====
-    function zoomToErrorLocation(coord, targetZoom = 21, errorObj = null) {
+    function zoomToErrorLocation(coord, targetZoom = 23, errorObj = null) {
         const map = window.__topoMap || findOlMap();
         if (!map) {
             console.warn('[TopologyChecker] Không tìm thấy bản đồ OpenLayers!');
@@ -360,14 +362,19 @@
 
         highlightErrorLocation(coord, errorObj);
 
-        const maxAllowedZoom = typeof view.getMaxZoom === 'function' ? view.getMaxZoom() : 22;
-        const finalZoom = Math.min(maxAllowedZoom, Math.max(targetZoom, 21));
+        let maxAllowedZoom = 24;
+        if (typeof view.getMaxZoom === 'function') {
+            const mz = view.getMaxZoom();
+            if (mz && !isNaN(mz) && isFinite(mz)) maxAllowedZoom = mz;
+        }
+
+        const finalZoom = Math.min(maxAllowedZoom, Math.max(targetZoom, 23));
 
         try {
             view.animate({
                 center: coord,
                 zoom: finalZoom,
-                duration: 500
+                duration: 400
             });
         } catch (e) {
             view.setCenter(coord);
@@ -375,7 +382,7 @@
         }
 
         setTimeout(updateMarkerPositions, 100);
-        setTimeout(updateMarkerPositions, 550);
+        setTimeout(updateMarkerPositions, 450);
 
         return true;
     }
@@ -398,9 +405,37 @@
             } catch (e) {}
         }
 
+        // Build 3DG Native Group Object matching exact 3DG React prop structure
+        const featureId = olFeature?.get?.('id') || olFeature?.getId?.() || geojsonFeature?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'feat-' + Date.now());
+        const shortId = String(featureId).slice(0, 4);
+        const geom = olFeature?.getGeometry?.();
+        const coords = geom?.getCoordinates?.() || geojsonFeature?.geometry?.coordinates || [];
+        const pointCount = coords.length || 0;
+        const landType = (olFeature && typeof olFeature.get === 'function' && olFeature.get('landType')) || geojsonFeature?.properties?.landType || 'DGT';
+        const color = (olFeature && typeof olFeature.get === 'function' && olFeature.get('color')) || geojsonFeature?.properties?.color || '#ffaa32';
+
+        const groupObject = {
+            id: featureId,
+            name: `Đường ${shortId}`,
+            mode: 'line',
+            color: color,
+            landType: landType,
+            pointCount: pointCount,
+            createdBy: '',
+            createdAt: new Date().toISOString(),
+            feature: olFeature || geojsonFeature
+        };
+
+        const itemContainer = {
+            group: groupObject,
+            isActive: false,
+            hidden: false,
+            ownerCount: 0
+        };
+
         // 2. Traversal of React Fiber tree to update 3dg.vn React state
         const root = document.getElementById('root') || document.body;
-        const candidates = [root, ...Array.from(document.querySelectorAll('div, section, aside, main, nav'))];
+        const candidates = [root, ...Array.from(document.querySelectorAll('div, section, aside, main, nav, ul, li'))];
 
         for (const el of candidates) {
             const key = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactContainer'));
@@ -411,12 +446,21 @@
                 try {
                     const props = node.memoizedProps;
                     if (props) {
+                        if (typeof props.onGroupAdd === 'function') {
+                            props.onGroupAdd(groupObject);
+                            log('Synced group via props.onGroupAdd');
+                        }
                         if (typeof props.onFeatureAdd === 'function') {
+                            props.onFeatureAdd(groupObject);
                             props.onFeatureAdd(olFeature || geojsonFeature);
                             log('Synced feature via props.onFeatureAdd');
                         }
+                        if (typeof props.setGroups === 'function' && Array.isArray(props.groups)) {
+                            props.setGroups(prev => [...prev, groupObject]);
+                            log('Synced group via props.setGroups');
+                        }
                         if (typeof props.setFeatures === 'function' && Array.isArray(props.features)) {
-                            props.setFeatures(prev => [...prev, geojsonFeature || olFeature]);
+                            props.setFeatures(prev => [...prev, groupObject]);
                             log('Synced feature via props.setFeatures');
                         }
                     }
@@ -427,14 +471,19 @@
                             const arr = s.memoizedState;
                             if (arr.length > 0) {
                                 const sample = arr[0];
-                                if (sample && (sample.type === 'Feature' || sample.geometry || sample.coordinates || sample.id)) {
+                                if (sample && (sample.group || sample.mode || sample.landType || sample.type === 'Feature' || sample.geometry || sample.id)) {
                                     s.queue.dispatch(prev => {
                                         if (Array.isArray(prev)) {
-                                            return [...prev, geojsonFeature || olFeature];
+                                            if (prev.length > 0 && prev[0].group) {
+                                                return [...prev, itemContainer];
+                                            } else if (prev.length > 0 && (prev[0].mode || prev[0].landType)) {
+                                                return [...prev, groupObject];
+                                            }
+                                            return [...prev, groupObject, geojsonFeature || olFeature];
                                         }
                                         return prev;
                                     });
-                                    log('Synced feature via React state dispatch!');
+                                    log('Synced group object via React state dispatch!');
                                 }
                             }
                         }

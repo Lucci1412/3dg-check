@@ -1,5 +1,5 @@
 // ============================================================
-// 3DG Map Tools — Area Selection & Line Deleter Module (Xóa Theo Vùng)
+// 3DG Map Tools — Feature Module 4: Area Deleter (Xóa Vùng)
 // - Simple interactive polygon drawing on map (Click points to outline area)
 // - Spatial query: finds all lines intersecting user-drawn polygon
 // - Highlights lines with glowing thick stroke
@@ -10,18 +10,16 @@
     'use strict';
 
     function log(...args) {
-        console.log('[AreaDeleter]', ...args);
+        console.log('[AreaDeleteFeature]', ...args);
     }
 
     // ===== STATE MANAGEMENT =====
     let isSelectingRegion = false;
-    let drawnPoints = []; // Array of [x, y] coordinates in map units
-    let selectedFeatureItems = []; // Array of { feature, source, layer, geometry, id }
+    let drawnPoints = [];
+    let selectedFeatureItems = [];
     let renderAnimationFrameId = null;
 
     // ===== SPATIAL ALGORITHMS =====
-
-    // Ray casting algorithm for Point-in-Polygon check
     function isPointInPolygon(point, vs) {
         const x = point[0], y = point[1];
         let inside = false;
@@ -35,7 +33,6 @@
         return inside;
     }
 
-    // Check if line segment AB intersects segment CD
     function segmentsIntersect(a, b, c, d) {
         function ccw(p1, p2, p3) {
             return (p3[1] - p1[1]) * (p2[0] - p1[0]) > (p2[1] - p1[1]) * (p3[0] - p1[0]);
@@ -43,7 +40,6 @@
         return (ccw(a, c, d) !== ccw(b, c, d)) && (ccw(a, b, c) !== ccw(a, b, d));
     }
 
-    // Check if line coordinates intersect or are contained inside polygon
     function lineIntersectsPolygon(lineCoords, polyCoords) {
         if (!polyCoords || polyCoords.length < 3) return false;
 
@@ -110,7 +106,6 @@
 
         ctx.save();
 
-        // 1. Fill & Stroke Polygon Area
         ctx.beginPath();
         ctx.moveTo(pixels[0][0], pixels[0][1]);
         for (let i = 1; i < pixels.length; i++) {
@@ -128,7 +123,6 @@
         ctx.setLineDash([6, 4]);
         ctx.stroke();
 
-        // 2. Draw Vertex Dots (Nốt giao điểm tĩnh)
         pixels.forEach(p => {
             ctx.beginPath();
             ctx.arc(p[0], p[1], 5, 0, Math.PI * 2);
@@ -172,7 +166,6 @@
         } catch (e) {}
     }
 
-    // ===== CLICK TO ADD VERTEX POINTS (WITH DRAG DETECTION & PROPAGATION STOP) =====
     let areaMouseDownPos = null;
 
     function isUIElementClick(e) {
@@ -199,7 +192,7 @@
 
         areaMouseDownPos = null;
 
-        if (dist > 6 || duration > 350) return; // Ignores drag/pan
+        if (dist > 6 || duration > 350) return;
 
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         const canvas = getOrCreateCanvasOverlay();
@@ -247,7 +240,6 @@
         } catch (e) {}
     }
 
-    // ===== START / CANCEL SELECTION =====
     function startAreaSelection() {
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         if (!map) return false;
@@ -291,7 +283,6 @@
         log('Area selection cancelled.');
     }
 
-    // ===== QUERY AND HIGHLIGHT INTERSECTING LINES =====
     function collectAllFeatures() {
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         if (!map) return [];
@@ -386,12 +377,10 @@
         return items;
     }
 
-    // ===== HIGHLIGHT LINES ON MAP =====
     function clearHighlightedFeatures() {
         selectedFeatureItems.forEach(item => {
             try {
                 if (item.isColorApplied) {
-                    // Do not revert style if user applied a new color!
                     return;
                 }
                 if (item.originalStyle !== undefined) {
@@ -429,7 +418,6 @@
         });
     }
 
-    // ===== DELETE SELECTED FEATURES =====
     function deleteSelectedFeatures() {
         if (!selectedFeatureItems || selectedFeatureItems.length === 0) return 0;
 

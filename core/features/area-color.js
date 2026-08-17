@@ -1,5 +1,5 @@
 // ============================================================
-// 3DG Map Tools — Area Colorizer Module (Đổi Màu Vùng)
+// 3DG Map Tools — Feature Module 3: Area Colorizer (Đổi Màu Vùng)
 // - Loads land-colors.json configuration with code, name, color & priority
 // - Supports Star ⭐ favorite pinning (saves to localStorage and sorts to top)
 // - Replicates 100% Ant Design Tooltip UI from design screenshots
@@ -11,11 +11,11 @@
     'use strict';
 
     function log(...args) {
-        console.log('[AreaColorizer]', ...args);
+        console.log('[AreaColorFeature]', ...args);
     }
 
     let landColorsData = [];
-    let favoriteCodes = new Set(); // Codes starred by user
+    let favoriteCodes = new Set();
     let colorPopoverEl = null;
     let currentColorHex = '#c026d3';
 
@@ -72,17 +72,11 @@
         return landColorsData;
     }
 
-    // Color palette grid matching Screenshot 1 exactly (5 rows x 8 cols)
     const PALETTE_GRID = [
-        // Row 1 (Soft pastel)
         '#ffcdd2', '#ffe0b2', '#fff9c4', '#c8e6c9', '#b2edd4', '#bbdefb', '#e1bee7', '#f8bbd0',
-        // Row 2 (Vibrant)
         '#ff5252', '#ff7043', '#ffca28', '#66bb6a', '#26c6da', '#42a5f5', '#7e57c2', '#ec407a',
-        // Row 3 (Bold)
         '#f44336', '#ff5722', '#ff9800', '#4caf50', '#00bcd4', '#2196f3', '#673ab7', '#e91e63',
-        // Row 4 (Dark deep)
         '#b71c1c', '#d84315', '#e65100', '#1b5e20', '#006064', '#0d47a1', '#4a148c', '#880e4f',
-        // Row 5 (Grayscale & Eyedropper)
         '#ffffff', '#e0e0e0', '#9e9e9e', '#616161', '#424242', '#212121', '#000000', 'rainbow'
     ];
 
@@ -101,13 +95,11 @@
                 <button class="topo-btn-icon" id="topo-popover-close">✕</button>
             </div>
             <div class="topo-popover-content">
-                <!-- Segmented Tab Control -->
                 <div class="topo-segmented-control">
                     <button class="topo-segmented-item active" id="topo-tab-landtype">Theo loại đất</button>
                     <button class="topo-segmented-item" id="topo-tab-custom">Màu tự chọn</button>
                 </div>
 
-                <!-- Tab 1: Theo Loại Đất (Matching Screenshot 2) -->
                 <div class="topo-tab-content" id="topo-view-landtype">
                     <div class="topo-search-box">
                         <svg class="topo-search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -117,14 +109,11 @@
                         <input type="text" id="topo-land-search-input" placeholder="Tìm theo mã hoặc tên loại đất..." />
                     </div>
                     <div class="topo-land-list miniScroll" id="topo-land-list">
-                        <!-- Populated dynamically -->
                     </div>
                 </div>
 
-                <!-- Tab 2: Màu Tự Chọn (Matching Screenshot 1) -->
                 <div class="topo-tab-content topo-view-hidden" id="topo-view-custom">
                     <div class="topo-palette-grid" id="topo-palette-grid">
-                        <!-- Populated dynamically -->
                     </div>
                     <div class="topo-custom-input-row">
                         <div class="topo-color-preview-box" id="topo-custom-preview-box" style="background:#c026d3"></div>
@@ -162,7 +151,6 @@
             );
         }
 
-        // Sort items: Starred / Priority 1 items FIRST, then alphabetically by code
         items.sort((a, b) => {
             const starA = isItemStarred(a) ? 1 : 0;
             const starB = isItemStarred(b) ? 1 : 0;
@@ -190,14 +178,12 @@
                 <span class="topo-land-name" title="${item.name}">${item.name}</span>
             `;
 
-            // Row click applies color
             row.addEventListener('click', (e) => {
-                if (e.target.closest('.topo-star-btn')) return; // Ignore star click
+                if (e.target.closest('.topo-star-btn')) return;
                 e.stopPropagation();
                 applyColorToSelectedFeatures(item.color, item.code);
             });
 
-            // Star click toggles favorite
             const starBtn = row.querySelector('.topo-star-btn');
             if (starBtn) {
                 starBtn.addEventListener('click', (e) => {
@@ -345,7 +331,6 @@
         }
     }
 
-    // ===== APPLY COLOR TO SELECTED FEATURES IN OPENLAYERS =====
     function applyColorToSelectedFeatures(colorValue, label) {
         const count = window.__areaDeleterGetSelectedCount ? window.__areaDeleterGetSelectedCount() : 0;
         if (count === 0) {

@@ -38,7 +38,7 @@
   { "code": "LNP", "name": "Đất lâm nghiệp", "color": "#aaff32", "priority": 0 },
   { "code": "LUK", "name": "Đất trồng lúa còn lại", "color": "#fffc96", "priority": 0 },
   { "code": "MNC", "name": "Đất có mặt nước chuyên dùng dạng ao, hồ", "color": "#b4ffff", "priority": 0 },
-  { "code": "NTS", name: "Đất nuôi trồng thủy sản", "color": "#aaffff", "priority": 0 },
+  { "code": "NTS", "name": "Đất nuôi trồng thủy sản", "color": "#aaffff", "priority": 0 },
   { "code": "OTC", "name": "Đất ở", "color": "#ffb4ff", "priority": 0 },
   { "code": "PNK", "name": "Đất phi nông nghiệp khác", "color": "#ffaaa0", "priority": 0 },
   { "code": "PNN", "name": "Nhóm đất phi nông nghiệp", "color": "#ffff64", "priority": 0 },
