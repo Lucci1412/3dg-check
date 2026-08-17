@@ -10,9 +10,7 @@
 (function () {
     'use strict';
 
-    function log(...args) {
-        console.log('[AreaColorFeature]', ...args);
-    }
+    function log() {}
 
     let landColorsData = [];
     let favoriteCodes = new Set();
@@ -181,7 +179,7 @@
             row.addEventListener('click', (e) => {
                 if (e.target.closest('.topo-star-btn')) return;
                 e.stopPropagation();
-                applyColorToSelectedFeatures(item.color, item.code);
+                handleColorSelected(item.color, item.code);
             });
 
             const starBtn = row.querySelector('.topo-star-btn');
@@ -229,7 +227,7 @@
                 btn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     updateCustomColorSelection(hex);
-                    applyColorToSelectedFeatures(hex, 'Màu tự chọn');
+                    handleColorSelected(hex, 'Màu tự chọn');
                 });
             }
 
@@ -293,7 +291,7 @@
                 if (val && !val.startsWith('#')) val = '#' + val;
                 if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
                     updateCustomColorSelection(val);
-                    applyColorToSelectedFeatures(val, 'Màu tự chọn');
+                    handleColorSelected(val, 'Màu tự chọn');
                 }
             });
         }
@@ -301,24 +299,44 @@
         if (colorPicker) {
             colorPicker.addEventListener('input', (e) => {
                 updateCustomColorSelection(e.target.value);
-                applyColorToSelectedFeatures(e.target.value, 'Màu tự chọn');
+                handleColorSelected(e.target.value, 'Màu tự chọn');
             });
         }
     }
 
-    async function showColorPopoverNearElement(targetEl) {
+    let activeCustomColorCallback = null;
+
+    function handleColorSelected(colorValue, label) {
+        if (typeof activeCustomColorCallback === 'function') {
+            const cb = activeCustomColorCallback;
+            activeCustomColorCallback = null;
+            cb(colorValue, label);
+            hideColorPopover();
+            return;
+        }
+        applyColorToSelectedFeatures(colorValue, label);
+    }
+
+    async function showColorPopoverNearElement(targetEl, onSelectCallback = null) {
+        activeCustomColorCallback = onSelectCallback;
         await fetchLandColorsData();
         const pop = getOrCreateColorPopover();
 
         renderLandTypeList(document.getElementById('topo-land-search-input')?.value || '');
         pop.classList.remove('topo-popover-hidden');
 
-        if (targetEl) {
+        if (targetEl && typeof targetEl.getBoundingClientRect === 'function') {
             const rect = targetEl.getBoundingClientRect();
-            let top = rect.top - pop.offsetHeight - 10;
-            if (top < 10) top = rect.bottom + 10;
-            let left = rect.left;
-            if (left + 320 > window.innerWidth) left = window.innerWidth - 330;
+            const popWidth = pop.offsetWidth || 320;
+            const popHeight = pop.offsetHeight || 380;
+
+            let top = rect.top - popHeight - 8;
+            if (top < 10) top = rect.bottom + 8;
+            if (top + popHeight > window.innerHeight - 10) top = Math.max(10, window.innerHeight - popHeight - 10);
+
+            let left = rect.left - 40;
+            if (left + popWidth > window.innerWidth - 10) left = Math.max(10, window.innerWidth - popWidth - 10);
+            if (left < 10) left = 10;
 
             pop.style.top = Math.max(10, top) + 'px';
             pop.style.left = Math.max(10, left) + 'px';
@@ -333,10 +351,7 @@
 
     function applyColorToSelectedFeatures(colorValue, label) {
         const count = window.__areaDeleterGetSelectedCount ? window.__areaDeleterGetSelectedCount() : 0;
-        if (count === 0) {
-            alert('Vui lòng chọn vùng và bấm "Hoàn Thành Vùng" trước khi đổi màu!');
-            return;
-        }
+        if (count === 0) return;
 
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
 
@@ -369,16 +384,25 @@
         features.forEach(item => {
             try {
                 item.isColorApplied = true;
+
+                item.feature.set('color', strokeColor);
+                item.feature.set('strokeColor', strokeColor);
+                item.feature.set('stroke', strokeColor);
+                item.feature.set('fill', strokeColor);
+                item.feature.set('OGR_STYLE', `PEN(c:${strokeColor.toUpperCase()},w:2px)`);
+                if (label) item.feature.set('landType', label);
+
                 if (newStyle) {
                     item.feature.setStyle(newStyle);
                     item.originalStyle = newStyle;
                 }
-                item.feature.set('color', strokeColor);
-                item.feature.set('strokeColor', strokeColor);
-                if (label) item.feature.set('landType', label);
 
                 if (typeof item.feature.changed === 'function') item.feature.changed();
                 if (item.source && typeof item.source.changed === 'function') item.source.changed();
+
+                if (map && window.__topoSyncFeatureToReactState) {
+                    window.__topoSyncFeatureToReactState(map, item.feature);
+                }
             } catch (e) {}
         });
 
@@ -386,7 +410,6 @@
             map.render();
         }
 
-        alert(`✅ Đã đổi màu thành công ${count} đường sang loại [${label}]!`);
         hideColorPopover();
         if (window.__areaDeleterCancel) window.__areaDeleterCancel();
     }

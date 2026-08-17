@@ -8,9 +8,7 @@
 (function () {
     'use strict';
 
-    function log(...args) {
-        console.log('[3DGMapBridge]', ...args);
-    }
+    function log() {}
 
     // ===== FIND OPENLAYERS MAP VIA REACT FIBER =====
     function findOlMap() {
@@ -387,103 +385,209 @@
         return true;
     }
 
+    function transformToLonLat(pt) {
+        if (!pt || !Array.isArray(pt) || pt.length < 2) return pt;
+        if (Math.abs(pt[0]) <= 180 && Math.abs(pt[1]) <= 90) return [pt[0], pt[1]];
+
+        const ol = window.ol || window.openlayers;
+        if (ol && ol.proj && typeof ol.proj.transform === 'function') {
+            try {
+                return ol.proj.transform(pt, 'EPSG:3857', 'EPSG:4326');
+            } catch (e) {}
+        }
+
+        try {
+            const x = pt[0];
+            const y = pt[1];
+            const lon = (x / 6378137) * (180 / Math.PI);
+            const lat = (Math.atan(Math.exp(y / 6378137)) - Math.PI / 4) * 2 * (180 / Math.PI);
+            return [lon, lat];
+        } catch (e) {
+            return pt;
+        }
+    }
+
     // ===== SYNC NEW FEATURES TO 3DG.VN REACT STATE & REDUX STORE =====
     function syncFeatureTo3dgReactState(olFeature, geojsonFeature) {
         const map = window.__topoMap || findOlMap();
 
-        // 1. Dispatch drawend event on OpenLayers draw interactions
-        if (map) {
-            try {
-                map.getInteractions().forEach(interaction => {
-                    const ctorName = interaction.constructor?.name || '';
-                    if (ctorName.includes('Draw') || typeof interaction.dispatchEvent === 'function') {
-                        try {
-                            interaction.dispatchEvent({ type: 'drawend', feature: olFeature });
-                        } catch (e) {}
-                    }
-                });
-            } catch (e) {}
+        let featureId = (olFeature && typeof olFeature.get === 'function' && olFeature.get('id')) || (geojsonFeature && geojsonFeature.id);
+        if (!featureId || featureId.length < 5) {
+            featureId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : 'feat-' + Date.now() + '-' + Math.floor(Math.random() * 1000000);
         }
 
-        // Build 3DG Native Group Object matching exact 3DG React prop structure
-        const featureId = olFeature?.get?.('id') || olFeature?.getId?.() || geojsonFeature?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : 'feat-' + Date.now());
-        const shortId = String(featureId).slice(0, 4);
         const geom = olFeature?.getGeometry?.();
         const coords = geom?.getCoordinates?.() || geojsonFeature?.geometry?.coordinates || [];
         const pointCount = coords.length || 0;
+
+        // Transform EPSG:3857 coordinates to WGS84 EPSG:4326 [lon, lat] for GeoJSON file export/import standard
+        const lonLatCoords = Array.isArray(coords[0]) ? coords.map(pt => transformToLonLat(pt)) : transformToLonLat(coords);
+
         const landType = (olFeature && typeof olFeature.get === 'function' && olFeature.get('landType')) || geojsonFeature?.properties?.landType || 'DGT';
-        const color = (olFeature && typeof olFeature.get === 'function' && olFeature.get('color')) || geojsonFeature?.properties?.color || '#ffaa32';
+        const strokeColor = (olFeature && typeof olFeature.get === 'function' && olFeature.get('color')) || geojsonFeature?.properties?.color || (landType === 'DTL' ? '#aaffff' : '#ffaa32');
+        const featureName = (olFeature && typeof olFeature.get === 'function' && olFeature.get('name') && !olFeature.get('name').includes('Đất công trình'))
+            ? olFeature.get('name')
+            : (landType === 'DTL' ? `Sông ${featureId.slice(0, 4)}` : `Đường ${featureId.slice(0, 4)}`);
+        const ogrStyle = `PEN(c:${strokeColor.toUpperCase()},w:2px)`;
+
+        const nativeProperties = {
+            color: strokeColor,
+            strokeColor: strokeColor,
+            stroke: strokeColor,
+            fill: strokeColor,
+            landType: landType,
+            Layer: landType,
+            OGR_STYLE: ogrStyle
+        };
+
+        // Ensure unique outer ID and vector properties are saved on olFeature so 3DG retains visual color & GeoJSON export integrity
+        if (olFeature) {
+            if (typeof olFeature.setId === 'function') olFeature.setId(featureId);
+            olFeature.id_ = featureId;
+            olFeature._id = featureId;
+            olFeature.id = featureId;
+
+            if (typeof olFeature.set === 'function') {
+                olFeature.set('color', strokeColor);
+                olFeature.set('strokeColor', strokeColor);
+                olFeature.set('stroke', strokeColor);
+                olFeature.set('fill', strokeColor);
+                olFeature.set('landType', landType);
+                olFeature.set('Layer', landType);
+                olFeature.set('OGR_STYLE', ogrStyle);
+                olFeature.set('name', featureName);
+            }
+            if (typeof olFeature.setId === 'function') olFeature.setId(featureId);
+        }
+
+        if (geojsonFeature) {
+            geojsonFeature.id = featureId;
+            geojsonFeature.properties = nativeProperties;
+        }
+
+        const geojsonFeatureObject = {
+            type: 'Feature',
+            id: featureId,
+            geometry: {
+                type: 'LineString',
+                coordinates: lonLatCoords
+            },
+            properties: nativeProperties
+        };
 
         const groupObject = {
             id: featureId,
-            name: `Đường ${shortId}`,
+            name: featureName,
             mode: 'line',
-            color: color,
-            landType: landType,
+            color: strokeColor,
             pointCount: pointCount,
             createdBy: '',
             createdAt: new Date().toISOString(),
-            feature: olFeature || geojsonFeature
+            feature: olFeature || geojsonFeatureObject
         };
 
         const itemContainer = {
             group: groupObject,
             isActive: false,
             hidden: false,
-            ownerCount: 0
+            ownerCount: 0,
+            feature: olFeature || geojsonFeatureObject
         };
 
-        // 2. Traversal of React Fiber tree to update 3dg.vn React state
+        // 1. Redux Store Dispatch (Global window.store or Redux DevTools)
+        function dispatchReduxStore(storeObj) {
+            if (!storeObj || typeof storeObj.dispatch !== 'function') return false;
+            let ok = false;
+            try {
+                const actionTypes = [
+                    'groups/addGroup', 'groups/add', 'groups/setGroups',
+                    'features/addFeature', 'features/add',
+                    'map/addGroup', 'map/addFeature',
+                    'ADD_GROUP', 'ADD_FEATURE'
+                ];
+                actionTypes.forEach(type => {
+                    try {
+                        storeObj.dispatch({ type: type, payload: groupObject });
+                        ok = true;
+                    } catch(e) {}
+                });
+            } catch(e) {}
+            return ok;
+        }
+
+        if (window.store && typeof window.store.dispatch === 'function') {
+            dispatchReduxStore(window.store);
+        }
+
+        // 2. Traversal of React Fiber tree to update 3dg.vn React state & Redux Store directly (Deduplicated)
+        let synced = false;
+        const dispatchedQueues = new Set();
+
         const root = document.getElementById('root') || document.body;
         const candidates = [root, ...Array.from(document.querySelectorAll('div, section, aside, main, nav, ul, li'))];
 
         for (const el of candidates) {
+            if (synced) break;
             const key = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactContainer'));
             if (!key) continue;
 
             let node = el[key];
-            for (let depth = 0; depth < 300 && node; depth++) {
+            for (let depth = 0; depth < 300 && node && !synced; depth++) {
                 try {
+                    const fiberStore = node.memoizedProps?.store || node.stateNode?.store || node.memoizedProps?.value?.store;
+                    if (fiberStore) {
+                        dispatchReduxStore(fiberStore);
+                    }
+
+                    const fiberDispatch = node.memoizedProps?.dispatch || node.memoizedProps?.value?.dispatch;
+                    if (typeof fiberDispatch === 'function') {
+                        try {
+                            fiberDispatch({ type: 'groups/add', payload: groupObject });
+                            fiberDispatch({ type: 'features/add', payload: groupObject });
+                        } catch(e) {}
+                    }
+
                     const props = node.memoizedProps;
                     if (props) {
                         if (typeof props.onGroupAdd === 'function') {
                             props.onGroupAdd(groupObject);
-                            log('Synced group via props.onGroupAdd');
+                            synced = true;
+                            break;
                         }
                         if (typeof props.onFeatureAdd === 'function') {
                             props.onFeatureAdd(groupObject);
-                            props.onFeatureAdd(olFeature || geojsonFeature);
-                            log('Synced feature via props.onFeatureAdd');
-                        }
-                        if (typeof props.setGroups === 'function' && Array.isArray(props.groups)) {
-                            props.setGroups(prev => [...prev, groupObject]);
-                            log('Synced group via props.setGroups');
-                        }
-                        if (typeof props.setFeatures === 'function' && Array.isArray(props.features)) {
-                            props.setFeatures(prev => [...prev, groupObject]);
-                            log('Synced feature via props.setFeatures');
+                            synced = true;
+                            break;
                         }
                     }
 
                     let s = node.memoizedState;
-                    while (s) {
+                    while (s && !synced) {
                         if (s.queue && typeof s.queue.dispatch === 'function' && Array.isArray(s.memoizedState)) {
-                            const arr = s.memoizedState;
-                            if (arr.length > 0) {
-                                const sample = arr[0];
-                                if (sample && (sample.group || sample.mode || sample.landType || sample.type === 'Feature' || sample.geometry || sample.id)) {
-                                    s.queue.dispatch(prev => {
-                                        if (Array.isArray(prev)) {
-                                            if (prev.length > 0 && prev[0].group) {
-                                                return [...prev, itemContainer];
-                                            } else if (prev.length > 0 && (prev[0].mode || prev[0].landType)) {
+                            if (!dispatchedQueues.has(s.queue)) {
+                                dispatchedQueues.add(s.queue);
+                                const arr = s.memoizedState;
+                                if (arr.length > 0) {
+                                    const sample = arr[0];
+                                    if (sample && (sample.group || sample.mode || sample.landType || sample.type === 'Feature' || sample.geometry || sample.id)) {
+                                        s.queue.dispatch(prev => {
+                                            if (Array.isArray(prev)) {
+                                                // Prevent adding duplicate feature with same ID
+                                                const exists = prev.some(item => (item.id === featureId || item.group?.id === featureId));
+                                                if (exists) return prev;
+
+                                                if (prev.length > 0 && prev[0].group) {
+                                                    return [...prev, itemContainer];
+                                                } else if (prev.length > 0 && (prev[0].mode || prev[0].landType)) {
+                                                    return [...prev, groupObject];
+                                                }
                                                 return [...prev, groupObject];
                                             }
-                                            return [...prev, groupObject, geojsonFeature || olFeature];
-                                        }
-                                        return prev;
-                                    });
-                                    log('Synced group object via React state dispatch!');
+                                            return prev;
+                                        });
+                                        synced = true;
+                                        break;
+                                    }
                                 }
                             }
                         }
@@ -519,11 +623,62 @@
         }
     }
 
+    function removeFeatureFrom3dgReactState(featureId) {
+        if (!featureId) return;
+
+        // 1. Redux Store
+        if (window.store && typeof window.store.dispatch === 'function') {
+            try {
+                window.store.dispatch({ type: 'groups/remove', payload: featureId });
+                window.store.dispatch({ type: 'groups/deleteGroup', payload: featureId });
+                window.store.dispatch({ type: 'features/remove', payload: featureId });
+            } catch(e) {}
+        }
+
+        // 2. Traversal of React Fiber tree
+        const root = document.getElementById('root') || document.body;
+        const candidates = [root, ...Array.from(document.querySelectorAll('div, section, aside, main, nav, ul, li'))];
+
+        for (const el of candidates) {
+            const key = Object.keys(el).find(k => k.startsWith('__reactFiber') || k.startsWith('__reactContainer'));
+            if (!key) continue;
+
+            let node = el[key];
+            for (let depth = 0; depth < 300 && node; depth++) {
+                try {
+                    let s = node.memoizedState;
+                    while (s) {
+                        if (s.queue && typeof s.queue.dispatch === 'function' && Array.isArray(s.memoizedState)) {
+                            const arr = s.memoizedState;
+                            if (arr.length > 0) {
+                                const sample = arr[0];
+                                if (sample && (sample.group || sample.mode || sample.landType || sample.type === 'Feature' || sample.geometry || sample.id)) {
+                                    s.queue.dispatch(prev => {
+                                        if (Array.isArray(prev)) {
+                                            return prev.filter(item => {
+                                                const id = item.id || item.group?.id || item.geojsonFeatureObject?.id;
+                                                return id !== featureId;
+                                            });
+                                        }
+                                        return prev;
+                                    });
+                                }
+                            }
+                        }
+                        s = s.next;
+                    }
+                } catch (e) {}
+                node = node.return;
+            }
+        }
+    }
+
     // Expose helpers globally
     window.__topoZoomToError = zoomToErrorLocation;
     window.__topoRenderAllOverlays = renderAllErrorOverlays;
     window.__topoClearHighlight = clearAllErrorOverlays;
     window.__topoSyncFeatureToReactState = syncFeatureTo3dgReactState;
+    window.__topoRemoveFeatureFromReactState = removeFeatureFrom3dgReactState;
     window.__topoToggleHighlight = toggleErrorHighlight;
 
     // Auto init check

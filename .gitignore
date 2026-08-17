@@ -12,3 +12,6 @@ desktop.ini
 # Log files & Scratch files
 *.log
 scratch/
+
+# Ignore Markdown documentation files
+*.md

@@ -22,13 +22,11 @@ styleLink.href = chrome.runtime.getURL('styles.css');
 
 function injectNext(index) {
     if (index >= scripts.length) {
-        console.log('[TopologyChecker] ✅ Tất cả các Module đã được nạp thành công!');
         return;
     }
     const script = document.createElement('script');
     script.src = chrome.runtime.getURL(scripts[index]);
     script.onload = function () {
-        console.log('[TopologyChecker] ✅ Module Loaded:', scripts[index]);
         this.remove();
         injectNext(index + 1);
     };

@@ -6,9 +6,7 @@
 (function () {
     'use strict';
 
-    function log(...args) {
-        console.log('[CheckTopoFeature]', ...args);
-    }
+    function log() {}
 
     // ===== SPATIAL UTILITIES =====
     function distSq(p1, p2) {

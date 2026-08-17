@@ -9,9 +9,7 @@
 (function () {
     'use strict';
 
-    function log(...args) {
-        console.log('[AreaDeleteFeature]', ...args);
-    }
+    function log() {}
 
     // ===== STATE MANAGEMENT =====
     let isSelectingRegion = false;
@@ -41,12 +39,20 @@
     }
 
     function lineIntersectsPolygon(lineCoords, polyCoords) {
-        if (!polyCoords || polyCoords.length < 3) return false;
+        if (!polyCoords || polyCoords.length < 3 || !lineCoords || lineCoords.length === 0) return false;
 
+        // Check 1: Any vertex inside polygon
         for (const pt of lineCoords) {
             if (isPointInPolygon(pt, polyCoords)) return true;
         }
 
+        // Check 2: Any segment midpoint inside polygon
+        for (let i = 0; i < lineCoords.length - 1; i++) {
+            const mid = [(lineCoords[i][0] + lineCoords[i + 1][0]) / 2, (lineCoords[i][1] + lineCoords[i + 1][1]) / 2];
+            if (isPointInPolygon(mid, polyCoords)) return true;
+        }
+
+        // Check 3: Any segment intersects polygon edge
         for (let i = 0; i < lineCoords.length - 1; i++) {
             const p1 = lineCoords[i];
             const p2 = lineCoords[i + 1];
@@ -381,6 +387,7 @@
         selectedFeatureItems.forEach(item => {
             try {
                 if (item.isColorApplied) {
+                    item.feature.setStyle(null);
                     return;
                 }
                 if (item.originalStyle !== undefined) {
@@ -406,16 +413,22 @@
                     const highlightStyle = new window.ol.style.Style({
                         stroke: new window.ol.style.Stroke({
                             color: '#0284c7',
-                            width: 6
+                            width: 7
                         }),
                         fill: new window.ol.style.Fill({
-                            color: 'rgba(2, 132, 199, 0.3)'
+                            color: 'rgba(2, 132, 199, 0.4)'
                         })
                     });
                     item.feature.setStyle(highlightStyle);
+                    if (typeof item.feature.changed === 'function') item.feature.changed();
+                    if (item.source && typeof item.source.changed === 'function') item.source.changed();
                 }
             } catch (e) {}
         });
+
+        if (map && typeof map.render === 'function') {
+            map.render();
+        }
     }
 
     function deleteSelectedFeatures() {
@@ -428,6 +441,10 @@
                 if (item.source && typeof item.source.removeFeature === 'function') {
                     item.source.removeFeature(item.feature);
                     deletedCount++;
+                }
+                const featId = item.feature.getId ? item.feature.getId() : item.feature.get?.('id');
+                if (featId && window.__topoRemoveFeatureFromReactState) {
+                    window.__topoRemoveFeatureFromReactState(featId);
                 }
             } catch (e) {
                 console.error('[AreaDeleter] Failed to remove feature:', e);

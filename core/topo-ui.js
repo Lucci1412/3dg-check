@@ -9,9 +9,7 @@
 (function () {
     'use strict';
 
-    function log(...args) {
-        console.log('[TopologyUI]', ...args);
-    }
+    function log() {}
 
     let isPanelOpen = false;
     let isMinimized = false;
@@ -61,17 +59,6 @@
                     <div class="topo-setting-row" style="margin-top:2px;">
                         <input type="range" id="topo-tolerance-slider" min="0.01" max="10.0" step="0.05" value="${(window.__topoConfig?.defaultTolerance || 0.5)}" style="flex:1;">
                     </div>
-                    <div class="topo-setting-row" style="margin-top:6px; border-top:1px dashed #cbd5e1; padding-top:6px; flex-direction:column; align-items:flex-start;">
-                        <label><b>🎨 Cài Đặt Màu Mặc Định:</b></label>
-                        <div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin-top:4px;">
-                            <label style="font-size:12px;" for="topo-color-dgt">🚗 Màu Đường (DGT):</label>
-                            <input type="color" id="topo-color-dgt" value="#ffaa32" style="width:32px; height:24px; border:none; cursor:pointer; border-radius:4px;">
-                        </div>
-                        <div style="display:flex; align-items:center; justify-content:space-between; width:100%; margin-top:4px;">
-                            <label style="font-size:12px;" for="topo-color-dtl">🌊 Màu Sông suối (DTL):</label>
-                            <input type="color" id="topo-color-dtl" value="#aaffff" style="width:32px; height:24px; border:none; cursor:pointer; border-radius:4px;">
-                        </div>
-                    </div>
                 </div>
 
                 <!-- Primary Action Buttons -->
@@ -95,16 +82,54 @@
                 <!-- Area Selection & Line Drawing Active Bar -->
                 <div class="topo-area-bar topo-drawer-hidden" id="topo-area-bar" style="flex-direction:column; gap:6px; padding:8px 10px;">
                     <div id="topo-draw-line-types" style="display:flex; align-items:center; gap:8px; width:100%;">
-                        <label class="topo-main-radio" style="display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:4px 8px; background:#fff3e0; border:1px solid #ffb74d; border-radius:5px; cursor:pointer; flex:1;">
-                            <input type="radio" name="topo-active-draw-type" value="DGT" checked style="margin:0;">
-                            <span id="topo-badge-dgt" style="width:12px; height:12px; border-radius:50%; background:#ffaa32; display:inline-block; border:1px solid #ea580c;"></span>
-                            <span>🚗 Vẽ Đường</span>
+                        <label class="topo-main-radio" style="display:inline-flex; align-items:center; justify-content:space-between; gap:5px; font-size:12px; font-weight:600; padding:4px 8px; background:#fff3e0; border:1px solid #ffb74d; border-radius:5px; cursor:pointer; flex:1;">
+                            <div style="display:flex; align-items:center; gap:5px;">
+                                <input type="radio" name="topo-active-draw-type" value="DGT" checked style="margin:0;">
+                                <span>Vẽ Đường</span>
+                            </div>
+                            <button type="button" class="topo-color-trigger-btn" id="topo-badge-dgt" title="Nhấp để mở bảng chọn loại đất & màu nét vẽ đường" style="width:20px; height:18px; border:1px solid #ea580c; border-radius:3px; padding:0; cursor:pointer; background:${localStorage.getItem('topo_color_dgt') || '#ffaa32'}; border-radius:4px; display:inline-block;"></button>
                         </label>
-                        <label class="topo-main-radio" style="display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600; padding:4px 8px; background:#e0f7fa; border:1px solid #4dd0e1; border-radius:5px; cursor:pointer; flex:1;">
-                            <input type="radio" name="topo-active-draw-type" value="DTL" style="margin:0;">
-                            <span id="topo-badge-dtl" style="width:12px; height:12px; border-radius:50%; background:#aaffff; display:inline-block; border:1px solid #0284c7;"></span>
-                            <span>🌊 Vẽ Sông</span>
+                        <label class="topo-main-radio" style="display:inline-flex; align-items:center; justify-content:space-between; gap:5px; font-size:12px; font-weight:600; padding:4px 8px; background:#e0f7fa; border:1px solid #4dd0e1; border-radius:5px; cursor:pointer; flex:1;">
+                            <div style="display:flex; align-items:center; gap:5px;">
+                                <input type="radio" name="topo-active-draw-type" value="DTL" style="margin:0;">
+                                <span>Vẽ Sông</span>
+                            </div>
+                            <button type="button" class="topo-color-trigger-btn" id="topo-badge-dtl" title="Nhấp để mở bảng chọn loại đất & màu nét vẽ sông" style="width:20px; height:18px; border:1px solid #0284c7; border-radius:3px; padding:0; cursor:pointer; background:${localStorage.getItem('topo_color_dtl') || '#aaffff'}; border-radius:4px; display:inline-block;"></button>
                         </label>
+                    </div>
+
+                    <!-- Distance Spacing Stepper Bar (Giãn khoảng cách 2 nét) -->
+                    <div id="topo-draw-dist-bar" style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:4px 8px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:12px; margin-top:2px;">
+                        <span style="font-weight:600; color:#475569; font-size:11px;">Giãn khoảng cách:</span>
+                        <div style="display:flex; align-items:center; gap:4px;">
+                            <button type="button" id="topo-dist-minus-btn" title="Giảm khoảng cách" style="width:24px; height:24px; font-weight:bold; font-size:14px; line-height:1; border:1px solid #cbd5e1; background:#ffffff; border-radius:4px; cursor:pointer; color:#334155; display:flex; align-items:center; justify-content:center;">−</button>
+                            <input type="number" id="topo-dist-input-val" value="${localStorage.getItem('topo_smart_dist') || '5.00'}" step="0.1" min="0.01" style="width:54px; height:24px; text-align:center; font-weight:700; font-size:12px; border:1px solid #cbd5e1; border-radius:4px; padding:0 2px; color:#0f172a;">
+                            <select id="topo-dist-unit-select" style="height:24px; font-weight:600; font-size:11px; border:1px solid #cbd5e1; border-radius:4px; background:#ffffff; cursor:pointer; padding:0 2px; color:#334155;">
+                                <option value="m" ${localStorage.getItem('topo_smart_unit') === 'm' || !localStorage.getItem('topo_smart_unit') ? 'selected' : ''}>m</option>
+                                <option value="dm" ${localStorage.getItem('topo_smart_unit') === 'dm' ? 'selected' : ''}>dm</option>
+                                <option value="cm" ${localStorage.getItem('topo_smart_unit') === 'cm' ? 'selected' : ''}>cm</option>
+                            </select>
+                            <button type="button" id="topo-dist-plus-btn" title="Tăng khoảng cách" style="width:24px; height:24px; font-weight:bold; font-size:14px; line-height:1; border:1px solid #cbd5e1; background:#ffffff; border-radius:4px; cursor:pointer; color:#334155; display:flex; align-items:center; justify-content:center;">+</button>
+                        </div>
+                    </div>
+
+                    <!-- Parallel Side Radio Options (Hướng song song: Phải / Trái / Cả 2 bên) -->
+                    <div id="topo-draw-side-bar" style="display:flex; align-items:center; justify-content:space-between; width:100%; padding:4px 8px; background:#f8fafc; border:1px solid #cbd5e1; border-radius:6px; font-size:11px; margin-top:2px;">
+                        <span style="font-weight:600; color:#475569; font-size:11px;">Hàng song song:</span>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <label style="display:inline-flex; align-items:center; gap:3px; cursor:pointer; font-weight:600; color:#334155;">
+                                <input type="radio" name="topo-active-draw-side" value="right" ${localStorage.getItem('topo_smart_side') === 'right' || !localStorage.getItem('topo_smart_side') ? 'checked' : ''} style="margin:0;">
+                                <span>Phải</span>
+                            </label>
+                            <label style="display:inline-flex; align-items:center; gap:3px; cursor:pointer; font-weight:600; color:#334155;">
+                                <input type="radio" name="topo-active-draw-side" value="left" ${localStorage.getItem('topo_smart_side') === 'left' ? 'checked' : ''} style="margin:0;">
+                                <span>Trái</span>
+                            </label>
+                            <label style="display:inline-flex; align-items:center; gap:3px; cursor:pointer; font-weight:600; color:#334155;">
+                                <input type="radio" name="topo-active-draw-side" value="both" ${localStorage.getItem('topo_smart_side') === 'both' ? 'checked' : ''} style="margin:0;">
+                                <span>Cả 2 bên</span>
+                            </label>
+                        </div>
                     </div>
                     <div style="display:flex; align-items:center; justify-content:space-between; width:100%;">
                         <div class="topo-area-status" id="topo-area-status" style="font-size:11px; color:#475569;">Click chọn điểm, nhấp đúp để xong</div>
@@ -271,11 +296,22 @@
             }
         }
 
+        const drawDistBar = document.getElementById('topo-draw-dist-bar');
+        const drawSideBar = document.getElementById('topo-draw-side-bar');
+
+        function setSmartDrawControlsVisible(visible) {
+            const displayVal = visible ? 'flex' : 'none';
+            if (lineTypeBox) lineTypeBox.style.display = displayVal;
+            if (drawDistBar) drawDistBar.style.display = displayVal;
+            if (drawSideBar) drawSideBar.style.display = displayVal;
+        }
+
         function cancelAllInteractiveModes() {
             if (window.__smartDrawerStop) window.__smartDrawerStop();
             if (window.__areaDeleterCancel) window.__areaDeleterCancel();
             if (window.__areaColorizerHidePopover) window.__areaColorizerHidePopover();
             if (areaBar) areaBar.classList.add('topo-drawer-hidden');
+            setSmartDrawControlsVisible(false);
             currentAreaMode = null;
             setUIVisibilityMode('scan');
         }
@@ -347,28 +383,138 @@
         const drawTypeRadios = document.querySelectorAll('input[name="topo-active-draw-type"]');
         const lineTypeBox = document.getElementById('topo-draw-line-types');
 
+        let activeDgtColor = localStorage.getItem('topo_color_dgt') || '#ffaa32';
+        let activeDtlColor = localStorage.getItem('topo_color_dtl') || '#aaffff';
+
+        function getDistanceInMeters() {
+            const inputEl = document.getElementById('topo-dist-input-val');
+            const unitEl = document.getElementById('topo-dist-unit-select');
+            const val = inputEl ? parseFloat(inputEl.value) || 5.0 : 5.0;
+            const unit = unitEl ? unitEl.value : 'm';
+
+            if (unit === 'cm') return val * 0.01;
+            if (unit === 'dm') return val * 0.1;
+            return val;
+        }
+
+        function updateSmartDrawDistance() {
+            const meters = getDistanceInMeters();
+            const inputEl = document.getElementById('topo-dist-input-val');
+            const unitEl = document.getElementById('topo-dist-unit-select');
+            if (inputEl) localStorage.setItem('topo_smart_dist', inputEl.value);
+            if (unitEl) localStorage.setItem('topo_smart_unit', unitEl.value);
+
+            if (window.__smartDrawerSetDistance) {
+                window.__smartDrawerSetDistance(meters);
+            }
+        }
+
         function getActiveDrawSettings() {
             const selectedRadio = document.querySelector('input[name="topo-active-draw-type"]:checked');
             const type = selectedRadio ? selectedRadio.value : 'DGT';
-            const color = type === 'DGT' ? (dgtColorPicker ? dgtColorPicker.value : '#ffaa32') : (dtlColorPicker ? dtlColorPicker.value : '#aaffff');
+            const color = type === 'DGT' ? activeDgtColor : activeDtlColor;
             return { type, color };
         }
 
         function updateColorBadgesAndDrawer() {
-            const dgtColor = dgtColorPicker ? dgtColorPicker.value : '#ffaa32';
-            const dtlColor = dtlColorPicker ? dtlColorPicker.value : '#aaffff';
-
-            if (badgeDgt) badgeDgt.style.backgroundColor = dgtColor;
-            if (badgeDtl) badgeDtl.style.backgroundColor = dtlColor;
+            if (badgeDgt) badgeDgt.style.backgroundColor = activeDgtColor;
+            if (badgeDtl) badgeDtl.style.backgroundColor = activeDtlColor;
 
             const { type, color } = getActiveDrawSettings();
+
             if (window.__smartDrawerSetLandType) {
                 window.__smartDrawerSetLandType(type, color);
             }
+
+            if (currentAreaMode === 'smart-draw') {
+                const distInMeters = getDistanceInMeters();
+                if (window.__smartDrawerStart) {
+                    window.__smartDrawerStart({ distance: distInMeters, side: 'right', landType: type, color });
+                }
+            }
         }
 
-        if (dgtColorPicker) dgtColorPicker.addEventListener('input', updateColorBadgesAndDrawer);
-        if (dtlColorPicker) dtlColorPicker.addEventListener('input', updateColorBadgesAndDrawer);
+        const distMinusBtn = document.getElementById('topo-dist-minus-btn');
+        const distPlusBtn = document.getElementById('topo-dist-plus-btn');
+        const distInputVal = document.getElementById('topo-dist-input-val');
+        const distUnitSelect = document.getElementById('topo-dist-unit-select');
+
+        function adjustDistanceStep(delta) {
+            if (!distInputVal) return;
+            let val = parseFloat(distInputVal.value) || 0;
+            const unit = distUnitSelect ? distUnitSelect.value : 'm';
+            const step = unit === 'cm' ? 10 : (unit === 'dm' ? 1 : 0.5);
+
+            let newVal = Math.max(0.01, val + delta * step);
+            distInputVal.value = (unit === 'm' ? newVal.toFixed(2) : (unit === 'dm' ? newVal.toFixed(1) : Math.round(newVal))).replace(/\.00$/, '');
+            updateSmartDrawDistance();
+        }
+
+        if (distMinusBtn) {
+            distMinusBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                adjustDistanceStep(-1);
+            });
+        }
+
+        if (distPlusBtn) {
+            distPlusBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                adjustDistanceStep(1);
+            });
+        }
+
+        if (distInputVal) {
+            distInputVal.addEventListener('input', () => updateSmartDrawDistance());
+            distInputVal.addEventListener('change', () => updateSmartDrawDistance());
+        }
+
+        if (distUnitSelect) {
+            distUnitSelect.addEventListener('change', () => updateSmartDrawDistance());
+        }
+
+        const drawSideRadios = document.querySelectorAll('input[name="topo-active-draw-side"]');
+        drawSideRadios.forEach(radio => {
+            radio.addEventListener('change', () => {
+                const selectedSide = document.querySelector('input[name="topo-active-draw-side"]:checked')?.value || 'right';
+                localStorage.setItem('topo_smart_side', selectedSide);
+                if (window.__smartDrawerSetSide) {
+                    window.__smartDrawerSetSide(selectedSide);
+                }
+            });
+        });
+
+        if (badgeDgt) {
+            badgeDgt.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (window.__areaColorizerShowPopover) {
+                    window.__areaColorizerShowPopover(badgeDgt, (color, landCode) => {
+                        activeDgtColor = color;
+                        localStorage.setItem('topo_color_dgt', color);
+                        if (landCode) localStorage.setItem('topo_code_dgt', landCode);
+                        updateColorBadgesAndDrawer();
+                    });
+                }
+            });
+        }
+
+        if (badgeDtl) {
+            badgeDtl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                if (window.__areaColorizerShowPopover) {
+                    window.__areaColorizerShowPopover(badgeDtl, (color, landCode) => {
+                        activeDtlColor = color;
+                        localStorage.setItem('topo_color_dtl', color);
+                        if (landCode) localStorage.setItem('topo_code_dtl', landCode);
+                        updateColorBadgesAndDrawer();
+                    });
+                }
+            });
+        }
 
         drawTypeRadios.forEach(radio => {
             radio.addEventListener('change', () => {
@@ -376,19 +522,28 @@
             });
         });
 
-        // 6. Smart Draw button
+        // 6. Smart Draw button (Hỗ trợ click Bật/Tắt chủ động)
         if (smartDrawBtn) {
             smartDrawBtn.addEventListener('click', () => {
                 if (smartDrawBtn.disabled) return;
+
+                // Nếu tính năng Vẽ Đường đang BẬT -> Click lần nữa sẽ TẮT VẼ chủ động!
+                if (currentAreaMode === 'smart-draw') {
+                    cancelAllInteractiveModes();
+                    setActiveModeButton('topo-btn-scan');
+                    setUIVisibilityMode('scan');
+                    log('Smart Draw toggled OFF by user click.');
+                    return;
+                }
+
+                // Nếu tính năng chưa bật -> BẬT VẼ
                 cancelAllInteractiveModes();
                 setUIVisibilityMode('interactive');
                 setActiveModeButton('topo-btn-smart-draw');
                 currentAreaMode = 'smart-draw';
 
-                const distEl = document.getElementById('topo-smart-dist');
-                const sideEl = document.getElementById('topo-smart-side');
-                const dist = distEl ? Number(distEl.value) : 5.0;
-                const side = sideEl ? sideEl.value : 'right';
+                const dist = getDistanceInMeters();
+                const side = document.querySelector('input[name="topo-active-draw-side"]:checked')?.value || 'right';
 
                 const { type: landType, color } = getActiveDrawSettings();
                 if (lineTypeBox) lineTypeBox.style.display = 'flex';
@@ -397,8 +552,13 @@
                     const ok = window.__smartDrawerStart({ distance: dist, side: side, landType, color });
                     if (ok && areaBar) {
                         areaBar.classList.remove('topo-drawer-hidden');
-                        if (areaStatus) areaStatus.innerHTML = `Click chọn điểm, <b>nhấp đúp hoặc click lại điểm cuối để xong</b>.`;
-                        if (areaFinishBtn) areaFinishBtn.style.display = 'none';
+                        setSmartDrawControlsVisible(true);
+                        if (areaStatus) areaStatus.textContent = '';
+                        if (areaFinishBtn) {
+                            areaFinishBtn.style.display = 'inline-flex';
+                            areaFinishBtn.textContent = '✓ Kết Thúc Nét Vẽ';
+                            areaFinishBtn.disabled = false;
+                        }
                         if (areaConfirmBtn) areaConfirmBtn.style.display = 'none';
                     }
                 }
@@ -412,8 +572,7 @@
                 setUIVisibilityMode('interactive');
                 setActiveModeButton('topo-btn-area-color');
                 currentAreaMode = 'color';
-                if (lineTypeBox) lineTypeBox.style.display = 'none';
-                if (window.__areaColorizerShowPopover) window.__areaColorizerShowPopover();
+                setSmartDrawControlsVisible(false);
                 if (window.__areaDeleterStart) {
                     const ok = window.__areaDeleterStart();
                     if (ok && areaBar) {
@@ -436,7 +595,7 @@
                 setUIVisibilityMode('interactive');
                 setActiveModeButton('topo-btn-area-delete');
                 currentAreaMode = 'delete';
-                if (lineTypeBox) lineTypeBox.style.display = 'none';
+                setSmartDrawControlsVisible(false);
                 if (window.__areaDeleterStart) {
                     const ok = window.__areaDeleterStart();
                     if (ok && areaBar) {
@@ -458,7 +617,8 @@
             const count = e.detail?.count || 0;
             if (areaStatus) {
                 if (currentAreaMode === 'smart-draw') {
-                    areaStatus.innerHTML = `Click chọn điểm, <b>nhấp đúp hoặc click lại điểm cuối để xong</b>.`;
+                    areaStatus.textContent = '';
+                    if (areaFinishBtn) areaFinishBtn.disabled = (count < 2);
                     return;
                 }
                 if (count < 3) {
@@ -493,7 +653,7 @@
                             areaConfirmBtn.textContent = `🎨 Chọn Màu (${selected.length} đường)`;
 
                             if (window.__areaColorizerShowPopover) {
-                                window.__areaColorizerShowPopover(areaFinishBtn);
+                                window.__areaColorizerShowPopover(areaConfirmBtn);
                             }
                         } else {
                             areaStatus.innerHTML = `⚠️ <b style="color:#dc2626">Đã quét thấy ${selected.length} đường</b> trong vùng.`;
@@ -523,10 +683,9 @@
             const count = window.__areaDeleterGetSelectedCount ? window.__areaDeleterGetSelectedCount() : 0;
             if (count === 0) return;
 
-            const sure = confirm(`Bạn có chắc chắn muốn XÓA VĨNH VIỄN ${count} đường/ranh giới trong vùng đã chọn không?`);
-            if (sure && window.__areaDeleterDelete) {
+            if (window.__areaDeleterDelete) {
                 const deleted = window.__areaDeleterDelete();
-                alert(`✅ Đã xóa thành công ${deleted} đường khỏi bản đồ!`);
+                log(`✅ Successfully deleted ${deleted} lines from map.`);
                 cancelAllInteractiveModes();
                 setActiveModeButton('topo-btn-scan');
             }
@@ -668,7 +827,7 @@
         const listEl = document.getElementById('topo-error-list');
 
         if (statsText) {
-            statsText.innerHTML = `<span class="topo-text-muted">🧹 Đã xóa toàn bộ kết quả quét topology.</span>`;
+            statsText.innerHTML = `<span class="topo-text-muted"> Đã xóa toàn bộ kết quả quét topology.</span>`;
         }
 
         if (listEl) {
@@ -776,7 +935,6 @@
             if (window.__topoToggleHighlight) {
                 window.__topoToggleHighlight(err.id, false);
             }
-            console.log(`[TopologyUI] 🔕 Turn OFF highlight for error [${err.id}]`);
             return;
         }
 
@@ -792,10 +950,7 @@
         const defaultZoom = window.__topoConfig?.defaultZoom || 24;
 
         if (window.__topoZoomToError) {
-            const ok = window.__topoZoomToError(err.coord, defaultZoom, err);
-            if (ok) {
-                console.log(`[TopologyUI] 🎯 Zoomed to error at [${err.coord[0]}, ${err.coord[1]}] (${err.type}, Zoom: ${defaultZoom})`);
-            }
+            window.__topoZoomToError(err.coord, defaultZoom, err);
         }
     }
 

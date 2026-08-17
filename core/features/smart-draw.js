@@ -9,9 +9,7 @@
 (function () {
     'use strict';
 
-    function log(...args) {
-        console.log('[SmartDrawFeature]', ...args);
-    }
+    function log() {}
 
     // ===== STATE MANAGEMENT =====
     let isSmartDrawing = false;
@@ -26,12 +24,23 @@
 
     let lastClickInfo = { time: 0, pos: null };
     let mouseDownPos = null;
+    let justFinishedTime = 0;
+    let lastSnapInfo = { coord: null, isSnapped: false };
 
     function setLandTypeAndColor(type, color) {
         if (type) currentLandType = type;
         if (color) currentColor = color;
+        ensureNative3dgLineModeActive(currentLandType);
         renderSmartDrawCanvas();
         log(`Updated SmartDrawer LandType: ${currentLandType}, Color: ${currentColor}`);
+    }
+
+    function setSideOption(side) {
+        if (side === 'right' || side === 'left' || side === 'both') {
+            currentSide = side;
+            renderSmartDrawCanvas();
+            log(`Updated SmartDrawer Side: ${currentSide}`);
+        }
     }
 
     // ===== GEOMETRY UTILITIES =====
@@ -205,7 +214,8 @@
             renderSides.forEach(side => {
                 const dist = side === 'left' ? -scaledDist : scaledDist;
                 let offsetCoords = computeParallelOffset(cleanFull, dist);
-                const cleanOffset = sanitizeCoords(offsetCoords);
+                const snappedOffset = snapOffsetLineCoords(map, offsetCoords, 25);
+                const cleanOffset = sanitizeCoords(snappedOffset);
                 const offsetPixels = cleanOffset.map(pt => map.getPixelFromCoordinate(pt)).filter(p => p && !isNaN(p[0]) && !isNaN(p[1]));
 
                 if (offsetPixels.length >= 2) {
@@ -243,6 +253,25 @@
                 }
             });
         }
+
+        // 3. Draw Green Magnet Ring Snap Indicator if mouse is snapped to existing vertex
+        if (lastSnapInfo && lastSnapInfo.isSnapped && lastSnapInfo.coord) {
+            const snapPx = map.getPixelFromCoordinate(lastSnapInfo.coord);
+            if (snapPx && !isNaN(snapPx[0]) && !isNaN(snapPx[1])) {
+                ctx.beginPath();
+                ctx.arc(snapPx[0], snapPx[1], 9, 0, Math.PI * 2);
+                ctx.strokeStyle = '#22c55e';
+                ctx.lineWidth = 2.5;
+                ctx.shadowColor = '#22c55e';
+                ctx.shadowBlur = 10;
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.arc(snapPx[0], snapPx[1], 4, 0, Math.PI * 2);
+                ctx.fillStyle = '#22c55e';
+                ctx.fill();
+            }
+        }
+
         ctx.restore();
     }
 
@@ -276,6 +305,66 @@
         } catch (e) {}
     }
 
+    // ===== VERTEX SNAPPING UTILITY =====
+    function getSnappedCoordinate(map, rawCoord, pxThreshold = 20) {
+        if (!map || !rawCoord) return { coord: rawCoord, isSnapped: false };
+        const mousePx = map.getPixelFromCoordinate(rawCoord);
+        if (!mousePx) return { coord: rawCoord, isSnapped: false };
+
+        let closestCoord = rawCoord;
+        let minPxDist = pxThreshold;
+        let isSnapped = false;
+
+        const { sources } = findAllTargetLineSources(map);
+        sources.forEach(src => {
+            if (!src || !src.getFeatures) return;
+            const features = src.getFeatures();
+            features.forEach(f => {
+                const geom = f.getGeometry?.();
+                if (!geom) return;
+                const type = geom.getType?.();
+                let coords = [];
+                if (type === 'LineString') {
+                    coords = geom.getCoordinates() || [];
+                } else if (type === 'MultiLineString') {
+                    const lines = geom.getCoordinates() || [];
+                    lines.forEach(l => coords.push(...l));
+                } else if (type === 'Polygon') {
+                    const rings = geom.getCoordinates() || [];
+                    rings.forEach(r => coords.push(...r));
+                }
+
+                coords.forEach(pt => {
+                    const px = map.getPixelFromCoordinate(pt);
+                    if (px && !isNaN(px[0]) && !isNaN(px[1])) {
+                        const dist = Math.hypot(mousePx[0] - px[0], mousePx[1] - px[1]);
+                        if (dist < minPxDist) {
+                            minPxDist = dist;
+                            closestCoord = pt;
+                            isSnapped = true;
+                        }
+                    }
+                });
+            });
+        });
+
+        return { coord: closestCoord, isSnapped };
+    }
+
+    function snapOffsetLineCoords(map, offsetCoords, snapThresholdPx = 25) {
+        if (!map || !offsetCoords || offsetCoords.length === 0) return offsetCoords;
+        const snapped = [];
+        for (let i = 0; i < offsetCoords.length; i++) {
+            const snapRes = getSnappedCoordinate(map, offsetCoords[i], snapThresholdPx);
+            if (snapRes.isSnapped) {
+                snapped.push(snapRes.coord);
+            } else {
+                snapped.push(offsetCoords[i]);
+            }
+        }
+        return snapped;
+    }
+
     // ===== MOUSE INTERACTION HANDLERS =====
     function isUIElementClick(e) {
         if (!e || !e.target) return false;
@@ -283,16 +372,12 @@
     }
 
     function onMouseDown(e) {
-        if (!isSmartDrawing || isUIElementClick(e) || e.button !== 0) return;
-        if (e.stopPropagation) e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        if (!isSmartDrawing || isUIElementClick(e) || e.button !== 0 || (Date.now() - justFinishedTime < 450)) return;
         mouseDownPos = { x: e.clientX, y: e.clientY, time: Date.now() };
     }
 
     function onMouseUp(e) {
-        if (!isSmartDrawing || !mouseDownPos || isUIElementClick(e) || e.button !== 0) return;
-        if (e.stopPropagation) e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+        if (!isSmartDrawing || !mouseDownPos || isUIElementClick(e) || e.button !== 0 || (Date.now() - justFinishedTime < 450)) return;
 
         const dx = e.clientX - mouseDownPos.x;
         const dy = e.clientY - mouseDownPos.y;
@@ -309,32 +394,51 @@
 
         const rect = canvas.getBoundingClientRect();
         const px = [e.clientX - rect.left, e.clientY - rect.top];
-        const coord = map.getCoordinateFromPixel(px);
+        const rawCoord = map.getCoordinateFromPixel(px);
 
-        if (coord) {
+        if (rawCoord) {
+            const snapRes = getSnappedCoordinate(map, rawCoord, 20);
+            const coord = snapRes.coord;
+            lastSnapInfo = snapRes;
+
             const now = Date.now();
             const timeDiff = now - lastClickInfo.time;
             const clickDist = lastClickInfo.pos ? Math.hypot(e.clientX - lastClickInfo.pos.x, e.clientY - lastClickInfo.pos.y) : Infinity;
 
-            // Only evaluate finish condition if we ALREADY have >= 2 points placed
             let isFinishAction = false;
-            if (activePoints.length >= 2) {
+
+            // Finish condition 1: Rapid double click (two clicks within 600ms and < 40px)
+            if (activePoints.length >= 1 && timeDiff < 600 && clickDist < 40) {
+                isFinishAction = true;
+            }
+
+            // Finish condition 2: Clicked on or near the last placed vertex (< 35px)
+            if (!isFinishAction && activePoints.length >= 2) {
                 const lastPt = activePoints[activePoints.length - 1];
                 const lastPx = map.getPixelFromCoordinate(lastPt);
                 if (lastPx) {
                     const distToLast = Math.hypot(px[0] - lastPx[0], px[1] - lastPx[1]);
-                    if (distToLast < 25) {
+                    if (distToLast < 35) {
                         isFinishAction = true;
                     }
-                }
-                if (timeDiff < 500 && clickDist < 25) {
-                    isFinishAction = true;
                 }
             }
 
             if (isFinishAction) {
                 log('⚡ Finish condition met (Double click or clicked last vertex)! Finishing line...');
                 lastClickInfo = { time: 0, pos: null };
+
+                // Clean up duplicate point added by second click of double-click if close to last point
+                if (activePoints.length >= 2) {
+                    const pLast = activePoints[activePoints.length - 1];
+                    const pPrev = activePoints[activePoints.length - 2];
+                    const pxLast = map.getPixelFromCoordinate(pLast);
+                    const pxPrev = map.getPixelFromCoordinate(pPrev);
+                    if (pxLast && pxPrev && Math.hypot(pxLast[0] - pxPrev[0], pxLast[1] - pxPrev[1]) < 35) {
+                        activePoints.pop();
+                    }
+                }
+
                 finishSmartDrawing();
                 return;
             }
@@ -356,23 +460,44 @@
 
         const rect = canvas.getBoundingClientRect();
         const px = [e.clientX - rect.left, e.clientY - rect.top];
-        const coord = map.getCoordinateFromPixel(px);
+        const rawCoord = map.getCoordinateFromPixel(px);
 
-        if (coord) {
-            currentMouseCoord = coord;
+        if (rawCoord) {
+            const snapRes = getSnappedCoordinate(map, rawCoord, 20);
+            currentMouseCoord = snapRes.coord;
+            lastSnapInfo = snapRes;
             renderSmartDrawCanvas();
         }
     }
 
     function onDblClick(e) {
-        if (!isSmartDrawing) return;
+        if (!isSmartDrawing || isUIElementClick(e) || (Date.now() - justFinishedTime < 450)) return;
+        if (e.preventDefault) e.preventDefault();
         if (e.stopPropagation) e.stopPropagation();
-        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
-        e.preventDefault();
 
-        if (activePoints.length >= 2) {
-            log('⚡ Captured native dblclick with >= 2 points! Finishing line...');
+        if (activePoints.length >= 1) {
+            log('⚡ Captured native dblclick! Finishing line...');
+            if (activePoints.length >= 2) {
+                const pLast = activePoints[activePoints.length - 1];
+                const pPrev = activePoints[activePoints.length - 2];
+                const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
+                if (map && pLast && pPrev) {
+                    const pxLast = map.getPixelFromCoordinate(pLast);
+                    const pxPrev = map.getPixelFromCoordinate(pPrev);
+                    if (pxLast && pxPrev && Math.hypot(pxLast[0] - pxPrev[0], pxLast[1] - pxPrev[1]) < 40) {
+                        activePoints.pop();
+                    }
+                }
+            }
             finishSmartDrawing();
+        }
+    }
+
+    function setDistanceInMeters(dist) {
+        if (typeof dist === 'number' && !isNaN(dist) && dist > 0) {
+            currentDistance = dist;
+            renderSmartDrawCanvas();
+            log(`Updated SmartDrawer Distance: ${currentDistance}m`);
         }
     }
 
@@ -424,10 +549,11 @@
     }
 
     // ===== FIND VECTOR SOURCE =====
-    function findTargetLineSource(map) {
-        if (!map) return { source: null, sample: null };
+    function findAllTargetLineSources(map) {
+        if (!map) return { primary: null, sources: [], sample: null };
 
-        let lineSource = null;
+        let sources = [];
+        let primarySource = null;
         let sampleLineFeature = null;
 
         function walk(layer) {
@@ -437,18 +563,28 @@
             }
             try {
                 const src = layer.getSource?.();
-                if (!src?.getFeatures) return;
+                if (!src || typeof src.addFeature !== 'function' || !src.getFeatures) return;
+
+                const layerId = String(layer.get?.('id') || layer.get?.('name') || layer.get?.('title') || '').toLowerCase();
+                if (layerId.includes('topo') || layerId.includes('highlight') || layerId.includes('overlay') || layerId.includes('canvas')) return;
+
                 const features = src.getFeatures();
+                let hasLineString = false;
                 for (const f of features) {
                     const type = f.getGeometry?.()?.getType?.();
                     if (type === 'LineString') {
-                        lineSource = src;
-                        sampleLineFeature = f;
-                        return;
+                        hasLineString = true;
+                        if (!sampleLineFeature) sampleLineFeature = f;
+                        break;
                     }
                 }
-                if (!lineSource && features.length > 0 && typeof src.addFeature === 'function') {
-                    lineSource = src;
+
+                if (!sources.includes(src)) {
+                    sources.push(src);
+                }
+
+                if (hasLineString || layerId.includes('edit') || layerId.includes('draw') || layerId.includes('main') || layerId.includes('vector')) {
+                    if (!primarySource) primarySource = src;
                 }
             } catch (e) {}
         }
@@ -457,7 +593,65 @@
             map.getLayers().forEach(walk);
         } catch (e) {}
 
-        return { source: lineSource, sample: sampleLineFeature };
+        if (!primarySource && sources.length > 0) {
+            primarySource = sources[0];
+        }
+
+        return { primary: primarySource, sources: sources, sample: sampleLineFeature };
+    }
+
+    function createOlStyleForFeature(color, width = 3.5, sampleFeature = null, map = null) {
+        const ol = window.ol || window.openlayers;
+        let StyleClass = ol?.style?.Style;
+        let StrokeClass = ol?.style?.Stroke;
+
+        if (!StyleClass && sampleFeature && typeof sampleFeature.getStyle === 'function') {
+            try {
+                const st = sampleFeature.getStyle();
+                const sampleInst = typeof st === 'function' ? st(sampleFeature, 1) : st;
+                const item = Array.isArray(sampleInst) ? sampleInst[0] : sampleInst;
+                if (item) {
+                    StyleClass = item.constructor;
+                    if (typeof item.getStroke === 'function') {
+                        const strokeInst = item.getStroke();
+                        if (strokeInst) StrokeClass = strokeInst.constructor;
+                    }
+                }
+            } catch (e) {}
+        }
+
+        if (!StyleClass && map) {
+            try {
+                map.getLayers().forEach(layer => {
+                    if (StyleClass) return;
+                    const st = layer.getStyle?.();
+                    if (st) {
+                        const sampleInst = typeof st === 'function' ? st(null, 1) : st;
+                        const item = Array.isArray(sampleInst) ? sampleInst[0] : sampleInst;
+                        if (item) {
+                            StyleClass = item.constructor;
+                            if (typeof item.getStroke === 'function') {
+                                const strokeInst = item.getStroke();
+                                if (strokeInst) StrokeClass = strokeInst.constructor;
+                            }
+                        }
+                    }
+                });
+            } catch (e) {}
+        }
+
+        if (StyleClass && StrokeClass) {
+            try {
+                return new StyleClass({
+                    stroke: new StrokeClass({
+                        color: color,
+                        width: width
+                    })
+                });
+            } catch (e) {}
+        }
+
+        return null;
     }
 
     // ===== ADD POLYLINE FEATURE WITH DYNAMICS LAND TYPE & COLOR =====
@@ -466,9 +660,9 @@
         if (!map || !clean || clean.length < 2) return null;
 
         const ol = window.ol || window.openlayers;
-        const { source: targetSource, sample: sampleFeature } = findTargetLineSource(map);
+        const { primary: targetSource, sources: allSources, sample: sampleFeature } = findAllTargetLineSources(map);
 
-        if (!targetSource) {
+        if (!targetSource && allSources.length === 0) {
             log('No vector source available on map to insert feature.');
             return null;
         }
@@ -483,13 +677,23 @@
             'ODT': 'Đất ở tại đô thị (ODT)'
         };
 
+        const activeType = extraProps.landType || currentLandType || 'DGT';
+        const activeColor = extraProps.color || currentColor || (activeType === 'DTL' ? '#aaffff' : '#ffaa32');
+        const strokeColor = activeColor;
+        const ogrStyle = `PEN(c:${strokeColor.toUpperCase()},w:2px)`;
+
         const featureId = generateUUID();
-        const dgtProperties = {
-            id: featureId,
-            landType: currentLandType || 'DGT',
-            name: landNameMap[currentLandType] || `Đất ${currentLandType || 'DGT'}`,
-            color: currentColor || '#ffaa32',
-            ...extraProps
+        const featureName = (activeType === 'DTL') ? `Sông ${featureId.slice(0, 4)}` : `Đường ${featureId.slice(0, 4)}`;
+
+        // Native properties structure matching 3DG native features
+        const dgtFullProperties = {
+            color: strokeColor,
+            strokeColor: strokeColor,
+            stroke: strokeColor,
+            fill: strokeColor,
+            landType: activeType,
+            Layer: activeType,
+            OGR_STYLE: ogrStyle
         };
 
         try {
@@ -526,44 +730,53 @@
 
                 if (newGeom) {
                     feat = new FeatureClass({ geometry: newGeom });
-                    if (typeof feat.setId === 'function') feat.setId(featureId);
-                    feat.set('id', featureId);
-
-                    try {
-                        const props = sampleFeature.getProperties() || {};
-                        delete props.geometry;
-                        feat.setProperties({ ...props, ...dgtProperties });
-                    } catch (e) {
-                        feat.setProperties(dgtProperties);
-                    }
                 }
             } else if (ol && ol.Feature && newGeom) {
                 feat = new ol.Feature({ geometry: newGeom });
-                if (typeof feat.setId === 'function') feat.setId(featureId);
-                feat.set('id', featureId);
-                feat.setProperties(dgtProperties);
             }
 
             if (feat) {
                 try {
-                    feat.set('landType', dgtProperties.landType);
-                    feat.set('color', dgtProperties.color);
-                    feat.set('name', dgtProperties.name);
+                    if (typeof feat.setId === 'function') feat.setId(featureId);
+                    feat.id_ = featureId;
+                    feat._id = featureId;
+                    feat.id = featureId;
 
-                    const strokeColor = dgtProperties.color || '#ffaa32';
-                    if (ol && ol.style && ol.style.Style && ol.style.Stroke) {
-                        feat.setStyle(new ol.style.Style({
-                            stroke: new ol.style.Stroke({
-                                color: strokeColor,
-                                width: 3.5
-                            })
-                        }));
+                    if (typeof feat.set === 'function') {
+                        feat.set('color', strokeColor);
+                        feat.set('strokeColor', strokeColor);
+                        feat.set('stroke', strokeColor);
+                        feat.set('fill', strokeColor);
+                        feat.set('landType', activeType);
+                        feat.set('Layer', activeType);
+                        feat.set('OGR_STYLE', ogrStyle);
+                        feat.set('name', featureName);
+                    }
+                    if (typeof feat.setId === 'function') feat.setId(featureId);
+
+                    const customStyle = createOlStyleForFeature(strokeColor, 3.5, sampleFeature, map);
+
+                    if (customStyle && typeof feat.setStyle === 'function') {
+                        feat.setStyle(customStyle);
                     }
 
-                    targetSource.addFeature(feat);
-                    if (typeof targetSource.changed === 'function') targetSource.changed();
-                    targetSource.dispatchEvent({ type: 'addfeature', feature: feat });
-                    targetSource.dispatchEvent('addfeature');
+                    allSources.forEach(src => {
+                        try {
+                            if (src && typeof src.addFeature === 'function') {
+                                const existing = src.getFeatureById ? src.getFeatureById(featureId) : null;
+                                if (!existing) {
+                                    src.addFeature(feat);
+                                    if (typeof feat.setId === 'function') feat.setId(featureId);
+                                    feat.id_ = featureId;
+                                    feat._id = featureId;
+                                    feat.id = featureId;
+                                    if (typeof src.changed === 'function') src.changed();
+                                    src.dispatchEvent({ type: 'addfeature', feature: feat });
+                                    src.dispatchEvent('addfeature');
+                                }
+                            }
+                        } catch (e) {}
+                    });
                 } catch (e) { }
             }
 
@@ -574,7 +787,7 @@
                     type: 'LineString',
                     coordinates: clean
                 },
-                properties: dgtProperties
+                properties: dgtFullProperties
             };
 
             if (!feat && targetSource) {
@@ -601,8 +814,31 @@
         return null;
     }
 
+    function cleanupNative3dgDefaultLine(map) {
+        if (!map) return;
+        const { primary: source } = findAllTargetLineSources(map);
+        if (!source || !source.getFeatures) return;
+
+        try {
+            const features = source.getFeatures();
+            features.forEach(f => {
+                const name = f.get?.('name') || '';
+                const landType = f.get?.('landType');
+                const id = f.get?.('id') || f.getId?.() || '';
+
+                if (!landType && typeof name === 'string' && (/^Đường\s+[a-z0-9]+/i.test(name) || name === 'Đường')) {
+                    log(`🧹 Removing redundant native 3DG default web line [${name}] (${id})`);
+                    try {
+                        source.removeFeature(f);
+                        if (typeof source.changed === 'function') source.changed();
+                    } catch (e) {}
+                }
+            });
+        } catch (e) {}
+    }
+
     // ===== ENSURE NATIVE 3DG EDIT PANEL & LINE MODE =====
-    function ensureNative3dgLineModeActive() {
+    function ensureNative3dgLineModeActive(landType = 'DGT') {
         try {
             const isPanelOpen = Array.from(document.querySelectorAll('div, span, h1, h2, h3, header'))
                 .some(el => (el.textContent || '').trim().includes('Biên tập dữ liệu'));
@@ -622,11 +858,13 @@
                 }
             }
 
+            const targetText = (landType === 'DTL') ? 'Sông' : 'Đường';
+
             const trySelectLine = () => {
                 const labels = Array.from(document.querySelectorAll('.ant-segmented-item, label'));
                 const lineLabel = labels.find(el => {
                     const text = (el.textContent || '').trim();
-                    return text === 'Đường' || (text.includes('Đường') && !text.includes('Smart') && !text.includes('Vẽ'));
+                    return text === targetText || (text.includes(targetText) && !text.includes('Smart') && !text.includes('Vẽ'));
                 });
 
                 if (lineLabel) {
@@ -635,17 +873,20 @@
                         lineLabel.click();
                         input.click();
                         input.dispatchEvent(new Event('change', { bubbles: true }));
-                        log('✅ Automatically activated native 3DG "Đường" mode radio button.');
                     } else if (!lineLabel.classList.contains('ant-segmented-item-selected')) {
                         lineLabel.click();
-                        log('✅ Clicked native 3DG "Đường" mode segment label.');
                     }
+                }
+
+                const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
+                if (map && isSmartDrawing) {
+                    disableNativeMapInteractions(map);
                 }
             };
 
             trySelectLine();
-            setTimeout(trySelectLine, 250);
-            setTimeout(trySelectLine, 600);
+            setTimeout(trySelectLine, 150);
+            setTimeout(trySelectLine, 400);
         } catch (e) {
             console.warn('[SmartDrawer] Failed to auto-trigger native edit panel and line mode:', e);
         }
@@ -653,10 +894,11 @@
 
     // ===== FINISH & SAVE DRAWING =====
     function finishSmartDrawing() {
-        ensureNative3dgLineModeActive();
         const cleanPoints = sanitizeCoords(activePoints);
         if (!isSmartDrawing || cleanPoints.length < 2) {
-            stopSmartDrawing();
+            activePoints = [];
+            currentMouseCoord = null;
+            clearCanvas();
             return;
         }
 
@@ -688,7 +930,8 @@
         renderSides.forEach(side => {
             const dist = side === 'left' ? -scaledDist : scaledDist;
             let offsetCoords = computeParallelOffset(cleanPoints, dist);
-            const cleanOffset = sanitizeCoords(offsetCoords);
+            const snappedOffset = snapOffsetLineCoords(map, offsetCoords, 25);
+            const cleanOffset = sanitizeCoords(snappedOffset);
             if (cleanOffset.length >= 2) {
                 addPolylineFeatureToMap(map, cleanOffset, extraProps);
             }
@@ -698,8 +941,23 @@
             window.dispatchEvent(new CustomEvent('topo:features-updated'));
         } catch (e) { }
 
-        stopSmartDrawing();
-        log('✅ Finish Smart Drawing complete and features saved.');
+        // Clean up any extra default web line ("Đường 9ade") created by 3DG native draw
+        setTimeout(() => {
+            cleanupNative3dgDefaultLine(map);
+        }, 100);
+        setTimeout(() => {
+            cleanupNative3dgDefaultLine(map);
+        }, 400);
+
+        // Reset points for NEXT line, keeping drawer active for continuous parallel line drawing!
+        activePoints = [];
+        currentMouseCoord = null;
+        lastClickInfo = { time: 0, pos: null };
+        mouseDownPos = null;
+        justFinishedTime = Date.now();
+        clearCanvas();
+
+        log('✅ Finish Smart Drawing complete and features saved. Ready for NEXT line!');
     }
 
     // ===== START / STOP SMART DRAWER =====
@@ -710,7 +968,6 @@
             return false;
         }
 
-        ensureNative3dgLineModeActive();
         disableNativeMapInteractions(map);
 
         isSmartDrawing = true;
@@ -723,6 +980,8 @@
         currentSide = options.side || 'right';
         if (options.landType) currentLandType = options.landType;
         if (options.color) currentColor = options.color;
+
+        ensureNative3dgLineModeActive(currentLandType);
 
         const canvas = getOrCreateCanvasOverlay();
         if (canvas) canvas.style.pointerEvents = 'none';
@@ -755,5 +1014,7 @@
     window.__smartDrawerStop = stopSmartDrawing;
     window.__smartDrawerFinish = finishSmartDrawing;
     window.__smartDrawerSetLandType = setLandTypeAndColor;
+    window.__smartDrawerSetDistance = setDistanceInMeters;
+    window.__smartDrawerSetSide = setSideOption;
 
 })();
