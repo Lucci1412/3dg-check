@@ -43,24 +43,12 @@
                     <span>Kiểm Tra Topology</span>
                 </div>
                 <div class="topo-header-actions">
-                    <button class="topo-btn-icon" id="topo-btn-settings" title="Cài đặt thông số (⚙️)">⚙️</button>
                     <button class="topo-btn-icon" id="topo-btn-minimize" title="Thu nhỏ / Mở rộng (—)">—</button>
                     <button class="topo-btn-icon" id="topo-btn-close" title="Đóng (✕)">✕</button>
                 </div>
             </div>
 
             <div class="topo-body" id="topo-body">
-                <!-- Settings Drawer (Toggled by ⚙️) -->
-                <div class="topo-settings-drawer topo-drawer-hidden" id="topo-settings-drawer">
-                    <div class="topo-setting-row" style="align-items: center; justify-content: space-between;">
-                        <label for="topo-tolerance-input">Dung sai check (m):</label>
-                        <input type="number" id="topo-tolerance-input" min="0.01" max="50.0" step="0.05" value="${(window.__topoConfig?.defaultTolerance || 0.5)}" style="width:75px; padding:3px 6px; border:1px solid #cbd5e1; border-radius:4px; font-weight:600; text-align:center; color:#0284c7;">
-                    </div>
-                    <div class="topo-setting-row" style="margin-top:2px;">
-                        <input type="range" id="topo-tolerance-slider" min="0.01" max="10.0" step="0.05" value="${(window.__topoConfig?.defaultTolerance || 0.5)}" style="flex:1;">
-                    </div>
-                </div>
-
                 <!-- Primary Action Buttons -->
                 <div class="topo-controls">
                     <div class="topo-btn-group">
@@ -198,30 +186,11 @@
         const panel = document.getElementById('topo-checker-panel');
         const closeBtn = document.getElementById('topo-btn-close');
         const minimizeBtn = document.getElementById('topo-btn-minimize');
-        const settingsBtn = document.getElementById('topo-btn-settings');
-        const settingsDrawer = document.getElementById('topo-settings-drawer');
         const body = document.getElementById('topo-body');
         const scanBtn = document.getElementById('topo-btn-scan');
         const smartDrawBtn = document.getElementById('topo-btn-smart-draw');
-        const tolSlider = document.getElementById('topo-tolerance-slider');
-        const tolVal = document.getElementById('topo-tol-val');
 
-        // 1. Settings button (⚙️)
-        if (settingsBtn && settingsDrawer) {
-            settingsBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                isSettingsOpen = !isSettingsOpen;
-                if (isSettingsOpen) {
-                    settingsDrawer.classList.remove('topo-drawer-hidden');
-                    settingsBtn.classList.add('--active');
-                } else {
-                    settingsDrawer.classList.add('topo-drawer-hidden');
-                    settingsBtn.classList.remove('--active');
-                }
-            });
-        }
-
-        // 2. Minimize button (—)
+        // 1. Minimize button (—)
         if (minimizeBtn && body) {
             minimizeBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -238,24 +207,13 @@
             });
         }
 
-        // 3. Close button (✕)
+        // 2. Close button (✕)
         if (closeBtn) {
             closeBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 isPanelOpen = false;
                 panel.classList.add('topo-panel-hidden');
                 fab.classList.remove('topo-fab-active');
-            });
-        }
-
-        // 4. Tolerance input & slider synchronization
-        const tolInput = document.getElementById('topo-tolerance-input');
-        if (tolSlider && tolInput) {
-            tolSlider.addEventListener('input', (e) => {
-                tolInput.value = e.target.value;
-            });
-            tolInput.addEventListener('input', (e) => {
-                tolSlider.value = e.target.value;
             });
         }
 
@@ -781,16 +739,14 @@
     // ===== EXECUTE TOPOLOGY SCAN =====
     function executeScan() {
         const scanBtn = document.getElementById('topo-btn-scan');
-        const tolInput = document.getElementById('topo-tolerance-input');
-        const tolSlider = document.getElementById('topo-tolerance-slider');
         const statsText = document.getElementById('topo-stats-text');
         const fabBadge = document.getElementById('topo-fab-badge');
 
-        const tolerance = parseFloat(tolInput?.value) || parseFloat(tolSlider?.value) || 0.5;
+        const tolerance = window.__topoConfig?.defaultTolerance || 0.5;
 
         scanBtn.disabled = true;
         scanBtn.innerHTML = `<span>⏳ Đang quét dữ liệu...</span>`;
-        statsText.textContent = `Đang quét dữ liệu bản đồ (dung sai ${tolerance}m)...`;
+        statsText.textContent = `Đang quét dữ liệu bản đồ...`;
 
         setTimeout(() => {
             if (window.__topoRunCheck) {

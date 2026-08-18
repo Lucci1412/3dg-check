@@ -129,17 +129,16 @@
             if (!px || isNaN(px[0]) || isNaN(px[1])) return;
 
             ctx.save();
+            // Outer ring (lightweight semi-transparent fill instead of costly shadowBlur)
             ctx.beginPath();
             ctx.arc(px[0], px[1], isLarge ? 14 : 9, 0, Math.PI * 2);
             ctx.fillStyle = colorRing;
-            ctx.shadowColor = colorRing;
-            ctx.shadowBlur = isLarge ? 18 : 12;
             ctx.fill();
 
+            // Inner dot
             ctx.beginPath();
             ctx.arc(px[0], px[1], isLarge ? 6 : 4, 0, Math.PI * 2);
             ctx.fillStyle = colorDot;
-            ctx.shadowBlur = 0;
             ctx.fill();
             ctx.strokeStyle = '#ffffff';
             ctx.lineWidth = 1.5;
@@ -157,8 +156,8 @@
                 const pts = seg.pathCoords || (seg.p1 && seg.p2 ? [seg.p1, seg.p2] : null);
                 if (pts && pts.length >= 2) {
                     const isShort = (seg.length || 0) < 30; // Đoạn ngắn dưới 30m phát sáng nổi bật hơn
-                    drawEndpointGlowingDot(pts[0], isShort ? 'rgba(234, 88, 12, 0.95)' : 'rgba(245, 158, 11, 0.85)', isShort ? '#ffed4a' : '#fbbf24', isShort);
-                    drawEndpointGlowingDot(pts[pts.length - 1], isShort ? 'rgba(234, 88, 12, 0.95)' : 'rgba(245, 158, 11, 0.85)', isShort ? '#ffed4a' : '#fbbf24', isShort);
+                    drawEndpointGlowingDot(pts[0], isShort ? 'rgba(234, 88, 12, 0.45)' : 'rgba(245, 158, 11, 0.35)', isShort ? '#ffed4a' : '#fbbf24', isShort);
+                    drawEndpointGlowingDot(pts[pts.length - 1], isShort ? 'rgba(234, 88, 12, 0.45)' : 'rgba(245, 158, 11, 0.35)', isShort ? '#ffed4a' : '#fbbf24', isShort);
                 }
             });
         }
@@ -167,15 +166,34 @@
         if (activeDuplicateSegment && !disabledHighlightIds.has(activeDuplicateSegment.id)) {
             const pts = activeDuplicateSegment.pathCoords || (activeDuplicateSegment.p1 && activeDuplicateSegment.p2 ? [activeDuplicateSegment.p1, activeDuplicateSegment.p2] : null);
             if (pts && pts.length >= 2) {
-                drawEndpointGlowingDot(pts[0], 'rgba(239, 68, 68, 0.95)', '#ffffff', true);
-                drawEndpointGlowingDot(pts[pts.length - 1], 'rgba(239, 68, 68, 0.95)', '#ffffff', true);
+                drawEndpointGlowingDot(pts[0], 'rgba(239, 68, 68, 0.55)', '#ffffff', true);
+                drawEndpointGlowingDot(pts[pts.length - 1], 'rgba(239, 68, 68, 0.55)', '#ffffff', true);
             }
         }
+    }
+
+    let updateMarkerAnimFrame = null;
+
+    function scheduleUpdateMarkerPositions() {
+        if (updateMarkerAnimFrame) return;
+        updateMarkerAnimFrame = requestAnimationFrame(() => {
+            updateMarkerAnimFrame = null;
+            updateMarkerPositions();
+        });
     }
 
     function updateMarkerPositions() {
         const map = window.__topoMap || findOlMap();
         if (!map) return;
+
+        if (!storedErrorItems.length && !storedDuplicateSegments.length && !activeDuplicateSegment) {
+            const canvas = document.getElementById('topo-line-highlight-canvas');
+            if (canvas) {
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+            return;
+        }
 
         if (storedErrorItems.length) {
             const container = getOrCreateMarkerLayerDiv();
@@ -211,20 +229,38 @@
         isListenerAttached = true;
 
         try {
-            map.on('postrender', updateMarkerPositions);
-            map.on('rendercomplete', updateMarkerPositions);
+            map.on('postrender', scheduleUpdateMarkerPositions);
         } catch(e) {}
 
         try {
             const view = map.getView();
             if (view && view.on) {
-                view.on('change:center', updateMarkerPositions);
-                view.on('change:resolution', updateMarkerPositions);
+                view.on('change:center', scheduleUpdateMarkerPositions);
+                view.on('change:resolution', scheduleUpdateMarkerPositions);
             }
         } catch(e) {}
 
-        window.addEventListener('resize', updateMarkerPositions);
-        setInterval(updateMarkerPositions, 200);
+        window.addEventListener('resize', scheduleUpdateMarkerPositions);
+    }
+
+    function detachMapRenderListeners(map) {
+        const targetMap = map || window.__topoMap || findOlMap();
+        if (!targetMap || !isListenerAttached) return;
+        isListenerAttached = false;
+
+        try {
+            targetMap.un('postrender', scheduleUpdateMarkerPositions);
+        } catch(e) {}
+
+        try {
+            const view = targetMap.getView();
+            if (view && view.un) {
+                view.un('change:center', scheduleUpdateMarkerPositions);
+                view.un('change:resolution', scheduleUpdateMarkerPositions);
+            }
+        } catch(e) {}
+
+        window.removeEventListener('resize', scheduleUpdateMarkerPositions);
     }
 
     // Clear tất cả các marker & line highlight
@@ -242,6 +278,7 @@
         storedDuplicateSegments = [];
         activeDuplicateSegment = null;
         activeErrorCoord = null;
+        detachMapRenderListeners();
     }
 
     // Hiển thị bóng đèn & highlight line cho TẤT CẢ các lỗi trên bản đồ
@@ -671,6 +708,381 @@
                 node = node.return;
             }
         }
+    }
+
+    // ===== QUICK TRASH BIN BUTTON INJECTION FOR 3DG LIST ITEMS =====
+    function extractCleanTitle(rawText) {
+        if (!rawText) return '';
+        let namePart = rawText.split('(')[0].trim();
+        namePart = namePart.replace(/^[^\w\sÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝàáâãèéêìíòóôõùúýĂăĐđĨĩŨũƠơƯưẠ-ỹ]+/u, '').trim();
+        return namePart;
+    }
+
+    function extractFeatureIdFromFiber(el) {
+        let curr = el;
+        while (curr && curr !== document.body) {
+            const key = Object.keys(curr).find(k => k.startsWith('__reactFiber'));
+            if (key) {
+                let fiber = curr[key];
+                for (let d = 0; d < 40 && fiber; d++) {
+                    const props = fiber.memoizedProps || fiber.pendingProps;
+                    if (props) {
+                        const candidate = props.group || props.item || props.feature || props.data || props;
+                        if (candidate) {
+                            const fid = candidate.id || candidate._id || candidate.featureId || candidate.groupId;
+                            if (fid) return fid.toString();
+                        }
+                        if (props.id) return props.id.toString();
+                    }
+                    fiber = fiber.return;
+                }
+            }
+            curr = curr.parentElement;
+        }
+        return null;
+    }
+
+    function collectAllMapFeatures() {
+        const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
+        if (!map) return [];
+
+        const results = [];
+        const seenFeatures = new Set();
+
+        function walk(layer) {
+            if (typeof layer.getLayers === 'function') {
+                try { layer.getLayers().forEach(walk); } catch (e) {}
+                return;
+            }
+            try {
+                const src = layer.getSource?.();
+                if (!src?.getFeatures) return;
+                for (const f of src.getFeatures()) {
+                    if (seenFeatures.has(f)) continue;
+                    seenFeatures.add(f);
+                    results.push({
+                        feature: f,
+                        id: (f.getId ? f.getId() : (f.get?.('id') || f.id || f._id || f.id_))?.toString() || '',
+                        name: (f.get?.('name') || f.get?.('Layer') || f.get?.('label') || '').toString().trim(),
+                        geometry: f.getGeometry?.(),
+                        layer: layer,
+                        source: src
+                    });
+                }
+            } catch (e) {}
+        }
+
+        try {
+            map.getLayers().forEach(walk);
+        } catch (e) {}
+
+        return results;
+    }
+
+    function triggerSilentNativeDelete(parentFlex) {
+        const toolsBtn = parentFlex.querySelector('button[title="Công cụ nhóm"]') || parentFlex.querySelector('.ant-dropdown-trigger');
+        if (!toolsBtn) return;
+
+        const styleEl = document.createElement('style');
+        styleEl.textContent = '.ant-dropdown, .ant-dropdown-menu-root, .ant-popover { display: none !important; opacity: 0 !important; visibility: hidden !important; }';
+        (document.head || document.documentElement).appendChild(styleEl);
+
+        try {
+            toolsBtn.click();
+            setTimeout(() => {
+                const dropdowns = Array.from(document.querySelectorAll('.ant-dropdown, .ant-dropdown-menu, div[role="tooltip"]'));
+                for (const menu of dropdowns) {
+                    const items = Array.from(menu.querySelectorAll('li, button, div, span, a'));
+                    const deleteItem = items.find(el => {
+                        const text = (el.textContent || '').trim();
+                        return (text === 'Xóa' || text === 'Xóa nhóm' || text.includes('Xóa') || text.includes('Delete'));
+                    });
+                    if (deleteItem) {
+                        deleteItem.click();
+                        break;
+                    }
+                }
+                setTimeout(() => {
+                    try { styleEl.remove(); } catch(e) {}
+                }, 120);
+            }, 25);
+        } catch (e) {
+            try { styleEl.remove(); } catch(err) {}
+        }
+    }
+
+    function removeFeatureDirectlyFromFlex(parentFlex) {
+        const titleBtn = parentFlex.querySelector('button[title*="chọn nhóm"]') || parentFlex.querySelector('button');
+        const rawTitle = titleBtn ? (titleBtn.textContent || '').trim() : '';
+        const cleanName = extractCleanTitle(rawTitle);
+        const targetId = extractFeatureIdFromFiber(parentFlex);
+
+        // 1. Select the item on 3DG first by clicking title button
+        if (titleBtn) {
+            try { titleBtn.click(); } catch(e) {}
+        }
+
+        // 2. Trigger silent native dropdown delete
+        triggerSilentNativeDelete(parentFlex);
+
+        // 3. Collect ALL map features (Exact same as Area Delete collectAllFeatures)
+        const allItems = collectAllMapFeatures();
+        let itemsToDelete = [];
+
+        if (targetId) {
+            itemsToDelete = allItems.filter(item => item.id && (item.id === targetId || item.id.includes(targetId) || targetId.includes(item.id)));
+        }
+
+        if (itemsToDelete.length === 0 && cleanName) {
+            const cleanLower = cleanName.toLowerCase();
+            itemsToDelete = allItems.filter(item => {
+                if (!item.name) return false;
+                const nLower = item.name.toLowerCase();
+                return (nLower === cleanLower || nLower.includes(cleanLower) || cleanLower.includes(nLower));
+            });
+        }
+
+        // Also check if any feature is selected in OpenLayers Select interaction
+        const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
+        if (map) {
+            try {
+                map.getInteractions().forEach(interaction => {
+                    if (typeof interaction.getFeatures === 'function') {
+                        const selFeats = interaction.getFeatures();
+                        if (selFeats && typeof selFeats.forEach === 'function') {
+                            selFeats.forEach(sf => {
+                                const found = allItems.find(it => it.feature === sf);
+                                if (found && !itemsToDelete.includes(found)) {
+                                    itemsToDelete.push(found);
+                                }
+                            });
+                        }
+                    }
+                });
+            } catch(e) {}
+        }
+
+        // 4. Delete EXACTLY like Area Delete: item.source.removeFeature(item.feature)
+        let deletedCount = 0;
+        const sourcesToRefresh = new Set();
+
+        itemsToDelete.forEach(item => {
+            try {
+                if (item.source && typeof item.source.removeFeature === 'function') {
+                    item.source.removeFeature(item.feature);
+                    sourcesToRefresh.add(item.source);
+                    deletedCount++;
+                }
+                const fid = item.id || item.feature.getId?.() || item.feature.get?.('id');
+                if (fid && window.__topoRemoveFeatureFromReactState) {
+                    window.__topoRemoveFeatureFromReactState(fid);
+                }
+            } catch (e) {
+                console.error('[TrashDelete] Error removing feature:', e);
+            }
+        });
+
+        if (targetId && window.__topoRemoveFeatureFromReactState) {
+            window.__topoRemoveFeatureFromReactState(targetId);
+        }
+
+        sourcesToRefresh.forEach(src => {
+            if (typeof src.changed === 'function') src.changed();
+        });
+
+        if (map && typeof map.render === 'function') {
+            map.render();
+        }
+
+        // 5. Smoothly fade out and remove card DOM element
+        const cardContainer = parentFlex.closest('.border') || parentFlex.parentElement;
+        if (cardContainer && cardContainer.parentNode) {
+            cardContainer.style.transition = 'opacity 0.15s ease';
+            cardContainer.style.opacity = '0';
+            setTimeout(() => {
+                try { cardContainer.remove(); } catch(e) {}
+            }, 150);
+        }
+    }
+
+    function injectQuickTrashButtons() {
+        const toolsBtns = document.querySelectorAll('button[title="Công cụ nhóm"], .ant-dropdown-trigger');
+        toolsBtns.forEach(btn => {
+            const parentFlex = btn.parentElement;
+            if (!parentFlex || parentFlex.querySelector('.topo-quick-delete-btn')) return;
+
+            const trashBtn = document.createElement('button');
+            trashBtn.type = 'button';
+            trashBtn.className = 'topo-quick-delete-btn p-1 text-red-500 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors cursor-pointer';
+            trashBtn.title = 'Xóa nhanh nét vẽ này (1-Click)';
+            trashBtn.style.cssText = 'display:inline-flex; align-items:center; justify-content:center; margin-left:2px; padding:3px; border:none; background:transparent; border-radius:4px; cursor:pointer; color:#ef4444; transition:color 0.15s, background 0.15s;';
+            trashBtn.innerHTML = `
+                <svg stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" style="width:14px; height:14px; pointer-events:none;" xmlns="http://www.w3.org/2000/svg">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                </svg>
+            `;
+
+            trashBtn.addEventListener('mouseenter', () => {
+                trashBtn.style.color = '#dc2626';
+                trashBtn.style.background = '#fef2f2';
+            });
+            trashBtn.addEventListener('mouseleave', () => {
+                trashBtn.style.color = '#ef4444';
+                trashBtn.style.background = 'transparent';
+            });
+
+            // Capture phase handler to isolate click
+            trashBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                removeFeatureDirectlyFromFlex(parentFlex);
+            }, true);
+
+            parentFlex.insertBefore(trashBtn, btn);
+        });
+    }
+
+    // ===== ENHANCE NATIVE 3DG LAND TYPE COLOR POPOVER WITH STAR FAVORITES =====
+    let isProcessingDom = false;
+
+    function getFavoriteLandCodes() {
+        try {
+            const saved = localStorage.getItem('topo_favorite_land_codes');
+            if (saved) return new Set(JSON.parse(saved));
+        } catch (e) {}
+        return new Set(['DGT', 'DTL', 'CLN', 'LUA', 'ODT', 'ONT']);
+    }
+
+    function saveFavoriteLandCodes(favSet) {
+        try {
+            localStorage.setItem('topo_favorite_land_codes', JSON.stringify(Array.from(favSet)));
+        } catch (e) {}
+    }
+
+    function enhanceNativeLandTypePopover() {
+        const popoverContainers = document.querySelectorAll('.ant-popover-container, .ant-popover, .ant-popover-content');
+        popoverContainers.forEach(container => {
+            const scrollList = container.querySelector('.max-h-64, .overflow-y-auto, .divide-y');
+            if (!scrollList) return;
+
+            const itemBtns = Array.from(scrollList.children).filter(el => el.tagName === 'BUTTON' || (el.classList && el.classList.contains('flex')));
+            if (itemBtns.length === 0) return;
+
+            const favSet = getFavoriteLandCodes();
+
+            itemBtns.forEach(btn => {
+                const spans = Array.from(btn.querySelectorAll('span'));
+                const codeSpan = spans.find(s => {
+                    const txt = (s.textContent || '').trim();
+                    return txt.length >= 2 && txt.length <= 4 && txt === txt.toUpperCase() && /^[A-Z0-9]+$/.test(txt);
+                });
+
+                if (!codeSpan) return;
+                const code = codeSpan.textContent.trim().toUpperCase();
+                btn.dataset.landCode = code;
+
+                let starBtn = btn.querySelector('.topo-native-star-btn');
+                if (!starBtn) {
+                    starBtn = document.createElement('button');
+                    starBtn.type = 'button';
+                    starBtn.className = 'topo-native-star-btn shrink-0 p-0.5 cursor-pointer';
+                    starBtn.style.cssText = 'border:none; background:transparent; font-size:14px; line-height:1; padding:2px 4px; cursor:pointer; user-select:none; font-family:sans-serif; margin-right:4px;';
+
+                    starBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        e.stopImmediatePropagation();
+
+                        const currentFavs = getFavoriteLandCodes();
+                        if (currentFavs.has(code)) {
+                            currentFavs.delete(code);
+                        } else {
+                            currentFavs.add(code);
+                        }
+                        saveFavoriteLandCodes(currentFavs);
+                        enhanceNativeLandTypePopover();
+                    }, true);
+
+                    btn.insertBefore(starBtn, btn.firstChild);
+                }
+
+                const isFav = favSet.has(code);
+                starBtn.innerHTML = isFav ? '⭐' : '☆';
+                starBtn.title = isFav ? 'Đã ghim ưu tiên (Bấm để bỏ ghim)' : 'Ghim ưu tiên loại đất này lên đầu';
+                starBtn.style.opacity = isFav ? '1' : '0.4';
+                btn.dataset.isFavorite = isFav ? '1' : '0';
+            });
+
+            // Check if sorting is actually required before mutating DOM
+            const sortedBtns = [...itemBtns].sort((a, b) => {
+                const isFavA = a.dataset.isFavorite === '1' ? 1 : 0;
+                const isFavB = b.dataset.isFavorite === '1' ? 1 : 0;
+                if (isFavA !== isFavB) return isFavB - isFavA;
+                return 0;
+            });
+
+            let isAlreadyInOrder = true;
+            for (let i = 0; i < itemBtns.length; i++) {
+                if (itemBtns[i] !== sortedBtns[i]) {
+                    isAlreadyInOrder = false;
+                    break;
+                }
+            }
+
+            // ONLY mutate DOM if order changed to avoid MutationObserver loop
+            if (!isAlreadyInOrder) {
+                sortedBtns.forEach(btn => scrollList.appendChild(btn));
+            }
+        });
+    }
+
+    // Attach popover enhancer strictly ONCE when user clicks any color swatch trigger button
+    if (typeof window !== 'undefined') {
+        document.addEventListener('click', (e) => {
+            const target = e.target;
+            const colorTrigger = target.closest && target.closest('button[title^="#"], button[title*="Màu"], span[title*="Màu"] button, .topo-color-trigger-btn, .ant-popover-open');
+            if (colorTrigger) {
+                setTimeout(enhanceNativeLandTypePopover, 30);
+                setTimeout(enhanceNativeLandTypePopover, 150);
+            }
+        }, true);
+    }
+
+    // DOM observer ONLY for quick trash button injection
+    if (typeof window !== 'undefined') {
+        const globalDomObserver = new MutationObserver(() => {
+            if (isProcessingDom) return;
+            isProcessingDom = true;
+            try {
+                injectQuickTrashButtons();
+            } finally {
+                isProcessingDom = false;
+            }
+        });
+
+        const startObserving = () => {
+            if (document.body) {
+                globalDomObserver.observe(document.body, { childList: true, subtree: true });
+            }
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startObserving);
+        } else {
+            startObserving();
+        }
+
+        setInterval(() => {
+            if (isProcessingDom) return;
+            isProcessingDom = true;
+            try {
+                injectQuickTrashButtons();
+            } finally {
+                isProcessingDom = false;
+            }
+        }, 1500);
     }
 
     // Expose helpers globally

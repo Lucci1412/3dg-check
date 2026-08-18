@@ -246,6 +246,20 @@
         } catch (e) {}
     }
 
+    function detachMapRenderListeners() {
+        const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
+        if (!map) return;
+
+        try {
+            map.un('postrender', requestPolygonRender);
+            const view = map.getView();
+            if (view && view.un) {
+                view.un('change:center', requestPolygonRender);
+                view.un('change:resolution', requestPolygonRender);
+            }
+        } catch (e) {}
+    }
+
     function startAreaSelection() {
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         if (!map) return false;
@@ -277,6 +291,7 @@
         selectedFeatureItems = [];
 
         detachCanvasMouseEvents();
+        detachMapRenderListeners();
 
         const canvas = document.getElementById('topo-area-draw-canvas');
         if (canvas) {

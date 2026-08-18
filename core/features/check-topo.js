@@ -29,6 +29,28 @@
         return (p[0] - projX) ** 2 + (p[1] - projY) ** 2;
     }
 
+    function getExtent(coords) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        function processPt(pt) {
+            if (!pt || typeof pt[0] !== 'number') return;
+            if (pt[0] < minX) minX = pt[0];
+            if (pt[0] > maxX) maxX = pt[0];
+            if (pt[1] < minY) minY = pt[1];
+            if (pt[1] > maxY) maxY = pt[1];
+        }
+        function walk(arr) {
+            if (!arr || !arr.length) return;
+            if (typeof arr[0] === 'number') processPt(arr);
+            else for (let i = 0; i < arr.length; i++) walk(arr[i]);
+        }
+        walk(coords);
+        return [minX, minY, maxX, maxY];
+    }
+
+    function extentsIntersect(ext1, ext2, tol = 0) {
+        return !(ext1[2] + tol < ext2[0] || ext1[0] - tol > ext2[2] || ext1[3] + tol < ext2[1] || ext1[1] - tol > ext2[3]);
+    }
+
     // ===== COLLECT ALL VECTOR FEATURES FROM MAP =====
     function collectAllFeatures() {
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
@@ -267,6 +289,13 @@
             if (!isConnected) {
                 for (const seg of allSegments) {
                     if (seg.featureId === v.featureId) continue;
+                    // Fast BBox check before heavy pointToSegmentDistSq calculation
+                    const minX = Math.min(seg.p1[0], seg.p2[0]) - tolerance;
+                    const maxX = Math.max(seg.p1[0], seg.p2[0]) + tolerance;
+                    const minY = Math.min(seg.p1[1], seg.p2[1]) - tolerance;
+                    const maxY = Math.max(seg.p1[1], seg.p2[1]) + tolerance;
+                    if (pt[0] < minX || pt[0] > maxX || pt[1] < minY || pt[1] > maxY) continue;
+
                     if (pointToSegmentDistSq(pt, seg.p1, seg.p2) <= tolSq) {
                         isConnected = true;
                         break;
@@ -319,14 +348,25 @@
             uniqueFeatureItems.push(item);
         }
 
+        // Precompute feature extents
+        const featureExtents = uniqueFeatureItems.map(item => {
+            const coords = item.geometry.getCoordinates?.() || [];
+            return getExtent(coords);
+        });
+
         const pairMap = new Map();
 
         for (let i = 0; i < uniqueFeatureItems.length; i++) {
             const f1 = uniqueFeatureItems[i];
+            const ext1 = featureExtents[i];
             const coords1 = f1.geometry.getCoordinates?.() || [];
             if (!coords1 || coords1.length < 2) continue;
 
             for (let j = i + 1; j < uniqueFeatureItems.length; j++) {
+                const ext2 = featureExtents[j];
+                // Skip feature pairs whose bounding boxes do not overlap (within tolerance)
+                if (!extentsIntersect(ext1, ext2, tolerance)) continue;
+
                 const f2 = uniqueFeatureItems[j];
                 const coords2 = f2.geometry.getCoordinates?.() || [];
                 if (!coords2 || coords2.length < 2) continue;
@@ -336,10 +376,20 @@
                 for (let s1 = 0; s1 < coords1.length - 1; s1++) {
                     const p1 = coords1[s1];
                     const p2 = coords1[s1 + 1];
+                    const segExt1 = [
+                        Math.min(p1[0], p2[0]), Math.min(p1[1], p2[1]),
+                        Math.max(p1[0], p2[0]), Math.max(p1[1], p2[1])
+                    ];
 
                     for (let s2 = 0; s2 < coords2.length - 1; s2++) {
                         const q1 = coords2[s2];
                         const q2 = coords2[s2 + 1];
+                        const segExt2 = [
+                            Math.min(q1[0], q2[0]), Math.min(q1[1], q2[1]),
+                            Math.max(q1[0], q2[0]), Math.max(q1[1], q2[1])
+                        ];
+
+                        if (!extentsIntersect(segExt1, segExt2, tolerance)) continue;
 
                         if (segmentsOverlap(p1, p2, q1, q2)) {
                             matches.push({ s1, s2, p1, p2, q1, q2 });
