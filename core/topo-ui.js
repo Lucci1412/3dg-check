@@ -41,6 +41,12 @@
                 <div class="topo-title">
                     <span class="topo-icon">🔍</span>
                     <span>Kiểm Tra Topology</span>
+                    <span class="topo-badge-premium">
+                        <svg class="topo-crown-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .55-.45 1-1 1H6c-.55 0-1-.45-1-1v-1h14v1z"/>
+                        </svg>
+                        PREMIUM
+                    </span>
                 </div>
                 <div class="topo-header-actions">
                     <button class="topo-btn-icon" id="topo-btn-minimize" title="Thu nhỏ / Mở rộng (—)">—</button>
@@ -241,6 +247,28 @@
             });
         }
 
+        function animatePanelHeightToContent() {
+            const panel = document.getElementById('topo-checker-panel');
+            if (!panel || panel.classList.contains('topo-panel-hidden')) return;
+
+            const startHeight = panel.offsetHeight;
+            panel.style.height = 'auto';
+            const targetHeight = panel.offsetHeight;
+
+            if (Math.abs(startHeight - targetHeight) < 4) return;
+
+            panel.style.height = startHeight + 'px';
+            panel.offsetHeight; // Force reflow
+            panel.style.transition = 'height 0.35s cubic-bezier(0.4, 0, 0.2, 1)';
+            panel.style.height = targetHeight + 'px';
+
+            setTimeout(() => {
+                try {
+                    if (panel.style.height !== 'auto') panel.style.height = 'auto';
+                } catch(e) {}
+            }, 360);
+        }
+
         const errorListContainer = document.getElementById('topo-error-list');
         const statsContainer = document.getElementById('topo-stats');
 
@@ -252,6 +280,7 @@
                 if (errorListContainer) errorListContainer.style.display = 'none';
                 if (statsContainer) statsContainer.style.display = 'none';
             }
+            animatePanelHeightToContent();
         }
 
         const drawDistBar = document.getElementById('topo-draw-dist-bar');
@@ -880,6 +909,17 @@
 
             listEl.appendChild(item);
         });
+
+        // Automatically scroll smoothly and stretch panel height
+        setTimeout(() => {
+            try {
+                if (statsEl) statsEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (e) {}
+            try {
+                if (listEl) listEl.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (e) {}
+            if (typeof animatePanelHeightToContent === 'function') animatePanelHeightToContent();
+        }, 60);
     }
 
     // ===== SELECT AND ZOOM TO ERROR (WITH TOGGLE OFF / TẮT SÁNG FEATURE) =====

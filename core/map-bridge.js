@@ -1038,7 +1038,7 @@
         });
     }
 
-    // Attach popover enhancer strictly ONCE when user clicks any color swatch trigger button
+    // Attach popover enhancer ONCE when user clicks any color swatch trigger button or types in search box
     if (typeof window !== 'undefined') {
         document.addEventListener('click', (e) => {
             const target = e.target;
@@ -1046,6 +1046,14 @@
             if (colorTrigger) {
                 setTimeout(enhanceNativeLandTypePopover, 30);
                 setTimeout(enhanceNativeLandTypePopover, 150);
+            }
+        }, true);
+
+        document.addEventListener('input', (e) => {
+            const target = e.target;
+            if (target && (target.placeholder?.includes('Tìm theo mã') || target.closest?.('.ant-popover-container, .ant-popover, .ant-popover-content, #topo-color-popover'))) {
+                setTimeout(enhanceNativeLandTypePopover, 30);
+                setTimeout(enhanceNativeLandTypePopover, 120);
             }
         }, true);
     }
