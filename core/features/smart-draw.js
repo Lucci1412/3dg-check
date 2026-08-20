@@ -686,6 +686,7 @@
         const featureName = (activeType === 'DTL') ? `Sông ${featureId.slice(0, 4)}` : `Đường ${featureId.slice(0, 4)}`;
 
         // Native properties structure matching 3DG native features
+        // Each feature MUST have a unique name so 3DG React treats them as separate independent groups
         const dgtFullProperties = {
             color: strokeColor,
             strokeColor: strokeColor,
@@ -693,7 +694,8 @@
             fill: strokeColor,
             landType: activeType,
             Layer: activeType,
-            OGR_STYLE: ogrStyle
+            OGR_STYLE: ogrStyle,
+            name: featureName
         };
 
         try {
@@ -743,12 +745,13 @@
                     feat.id = featureId;
 
                     if (typeof feat.set === 'function') {
+                        // Only set color + name on the OL feature.
+                        // DO NOT set Layer/landType — 3DG groups-selects ALL features sharing the same Layer value.
+                        // Native 3DG lines have properties:null and are selected independently.
                         feat.set('color', strokeColor);
                         feat.set('strokeColor', strokeColor);
                         feat.set('stroke', strokeColor);
                         feat.set('fill', strokeColor);
-                        feat.set('landType', activeType);
-                        feat.set('Layer', activeType);
                         feat.set('OGR_STYLE', ogrStyle);
                         feat.set('name', featureName);
                     }
@@ -760,19 +763,20 @@
                         feat.setStyle(customStyle);
                     }
 
+                    // Must add to ALL sources for feature to appear on map canvas (3DG uses multiple OL sources)
+                    // CRITICAL: do NOT call src.dispatchEvent manually — src.addFeature() already fires
+                    // 'addfeature' internally. Calling it again causes 3DG to process the feature multiple times
+                    // → duplicate panel entries → all activate together.
                     allSources.forEach(src => {
                         try {
                             if (src && typeof src.addFeature === 'function') {
                                 const existing = src.getFeatureById ? src.getFeatureById(featureId) : null;
                                 if (!existing) {
-                                    src.addFeature(feat);
+                                    src.addFeature(feat); // OL fires 'addfeature' automatically here
                                     if (typeof feat.setId === 'function') feat.setId(featureId);
                                     feat.id_ = featureId;
                                     feat._id = featureId;
                                     feat.id = featureId;
-                                    if (typeof src.changed === 'function') src.changed();
-                                    src.dispatchEvent({ type: 'addfeature', feature: feat });
-                                    src.dispatchEvent('addfeature');
                                 }
                             }
                         } catch (e) {}
@@ -802,11 +806,11 @@
                 }
             }
 
-            if (window.__topoSyncFeatureToReactState) {
-                window.__topoSyncFeatureToReactState(feat, geojsonFeat);
-            }
-
-            log(`✅ Saved LineString [${featureId}] into OpenLayers source & React State.`);
+            // NOTE: Do NOT call __topoSyncFeatureToReactState here.
+            // The src.dispatchEvent({ type: 'addfeature', feature: feat }) above already
+            // triggers 3DG's native React state update. Calling sync manually creates a
+            // DUPLICATE panel entry with a different ID → "Tất cả (2)" for 1 feature → all activate together.
+            log(`✅ Saved LineString [${featureId}] into OpenLayers source (3DG will sync to React natively).`);
             return feat || geojsonFeat;
         } catch (e) {
             console.error('[SmartDrawer] Failed to add feature to OpenLayers map source:', e);
@@ -816,25 +820,37 @@
 
     function cleanupNative3dgDefaultLine(map) {
         if (!map) return;
-        const { primary: source } = findAllTargetLineSources(map);
-        if (!source || !source.getFeatures) return;
+        // Check ALL sources (not just primary) since 3DG may create BAN_VE line in a different source
+        const { sources: allSources } = findAllTargetLineSources(map);
 
-        try {
-            const features = source.getFeatures();
-            features.forEach(f => {
-                const name = f.get?.('name') || '';
-                const landType = f.get?.('landType');
-                const id = f.get?.('id') || f.getId?.() || '';
+        allSources.forEach(source => {
+            if (!source || !source.getFeatures) return;
+            try {
+                const features = [...source.getFeatures()]; // Clone to avoid mutation during iteration
+                features.forEach(f => {
+                    const landType = f.get?.('landType');
+                    const layerProp = f.get?.('Layer') || f.get?.('layer') || '';
+                    const color = f.get?.('color') || f.get?.('stroke') || '';
+                    const name = f.get?.('name') || '';
 
-                if (!landType && typeof name === 'string' && (/^Đường\s+[a-z0-9]+/i.test(name) || name === 'Đường')) {
-                    log(`🧹 Removing redundant native 3DG default web line [${name}] (${id})`);
-                    try {
-                        source.removeFeature(f);
-                        if (typeof source.changed === 'function') source.changed();
-                    } catch (e) {}
-                }
-            });
-        } catch (e) {}
+                    // Native 3DG BAN_VE line: no landType, Layer === 'BAN_VE', gray color (#c8c8c8)
+                    const isBanVeLine = !landType && (
+                        layerProp === 'BAN_VE' ||
+                        color.toLowerCase() === '#c8c8c8' ||
+                        (/^Đường\s+[a-z0-9]+$/i.test(name) && !landType)
+                    );
+
+                    if (isBanVeLine) {
+                        const id = f.getId?.() || '';
+                        log(`🧹 Removing native 3DG default BAN_VE line [Layer:${layerProp}] [color:${color}] [name:${name}] (${id})`);
+                        try {
+                            source.removeFeature(f);
+                            if (typeof source.changed === 'function') source.changed();
+                        } catch (e) {}
+                    }
+                });
+            } catch (e) {}
+        });
     }
 
     // ===== ENSURE NATIVE 3DG EDIT PANEL & LINE MODE =====
@@ -921,21 +937,31 @@
 
         const extraProps = {
             landType: currentLandType,
-            color: currentColor,
-            name: landNameMap[currentLandType] || `Đất ${currentLandType}`
+            color: currentColor
         };
 
-        const mainFeat = addPolylineFeatureToMap(map, cleanPoints, extraProps);
-
-        renderSides.forEach(side => {
-            const dist = side === 'left' ? -scaledDist : scaledDist;
+        if (currentSide === 'both') {
+            // For 'both': only create 2 offset lines (left + right), NO center line
+            ['right', 'left'].forEach(side => {
+                const dist = side === 'left' ? -scaledDist : scaledDist;
+                let offsetCoords = computeParallelOffset(cleanPoints, dist);
+                const snappedOffset = snapOffsetLineCoords(map, offsetCoords, 25);
+                const cleanOffset = sanitizeCoords(snappedOffset);
+                if (cleanOffset.length >= 2) {
+                    addPolylineFeatureToMap(map, cleanOffset, extraProps);
+                }
+            });
+        } else {
+            // For 'right' or 'left': main drawn line + 1 parallel offset = 2 independent lines
+            addPolylineFeatureToMap(map, cleanPoints, extraProps);
+            const dist = currentSide === 'left' ? -scaledDist : scaledDist;
             let offsetCoords = computeParallelOffset(cleanPoints, dist);
             const snappedOffset = snapOffsetLineCoords(map, offsetCoords, 25);
             const cleanOffset = sanitizeCoords(snappedOffset);
             if (cleanOffset.length >= 2) {
                 addPolylineFeatureToMap(map, cleanOffset, extraProps);
             }
-        });
+        }
 
         try {
             window.dispatchEvent(new CustomEvent('topo:features-updated'));
@@ -948,6 +974,22 @@
         setTimeout(() => {
             cleanupNative3dgDefaultLine(map);
         }, 400);
+
+        // Clear OL Select interaction so newly added features don't appear auto-highlighted/thick
+        // 3DG auto-selects the last addfeature — we deselect it immediately after
+        function clearOlSelection() {
+            try {
+                map.getInteractions().forEach(interaction => {
+                    if (typeof interaction.getFeatures === 'function') {
+                        try { interaction.getFeatures().clear(); } catch(e) {}
+                    }
+                });
+                // Also try clicking outside to deselect via 3DG's own UI
+                if (typeof map.render === 'function') map.render();
+            } catch(e) {}
+        }
+        setTimeout(clearOlSelection, 150);
+        setTimeout(clearOlSelection, 500);
 
         // Reset points for NEXT line, keeping drawer active for continuous parallel line drawing!
         activePoints = [];

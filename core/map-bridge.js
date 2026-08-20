@@ -474,7 +474,8 @@
             fill: strokeColor,
             landType: landType,
             Layer: landType,
-            OGR_STYLE: ogrStyle
+            OGR_STYLE: ogrStyle,
+            name: featureName
         };
 
         // Ensure unique outer ID and vector properties are saved on olFeature so 3DG retains visual color & GeoJSON export integrity
@@ -499,7 +500,8 @@
 
         if (geojsonFeature) {
             geojsonFeature.id = featureId;
-            geojsonFeature.properties = nativeProperties;
+            // Preserve existing properties and merge, so unique `name` is not lost
+            geojsonFeature.properties = Object.assign({}, geojsonFeature.properties || {}, nativeProperties);
         }
 
         const geojsonFeatureObject = {

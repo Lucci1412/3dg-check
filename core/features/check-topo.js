@@ -57,7 +57,11 @@
         if (!map) return [];
 
         const results = [];
-        const seenFeatures = new Set();
+        // FIX: Dedup theo cả object reference VÀ fingerprint (featureId + tọa độ đầu tiên)
+        // để tránh trường hợp map đang transition/edit trả về nhiều object khác nhau
+        // cho cùng 1 feature vật lý (cùng id hoặc cùng tọa độ)
+        const seenFeatureObjects = new Set();
+        const seenFeatureFingerprints = new Set();
 
         function walk(layer) {
             if (typeof layer.getLayers === 'function') {
@@ -68,16 +72,41 @@
                 const src = layer.getSource?.();
                 if (!src?.getFeatures) return;
                 for (const f of src.getFeatures()) {
-                    if (seenFeatures.has(f)) continue;
-                    seenFeatures.add(f);
+                    // Dedup theo object reference
+                    if (seenFeatureObjects.has(f)) continue;
+                    seenFeatureObjects.add(f);
+
                     const geom = f.getGeometry?.();
                     if (!geom) continue;
 
                     const type = geom.getType();
                     if (type === 'LineString' || type === 'MultiLineString' || type === 'Polygon' || type === 'MultiPolygon') {
+                        // FIX: Dedup thêm theo fingerprint = featureId + tọa độ điểm đầu tiên
+                        // Phòng trường hợp map tạo object mới cho cùng 1 feature
+                        const fId = f.getId?.();
+                        let fingerprint = null;
+                        try {
+                            const coords = geom.getCoordinates();
+                            // Lấy điểm đầu tiên để tạo fingerprint
+                            let firstPt = coords;
+                            while (Array.isArray(firstPt) && Array.isArray(firstPt[0])) firstPt = firstPt[0];
+                            if (Array.isArray(firstPt) && typeof firstPt[0] === 'number') {
+                                const px = Math.round(firstPt[0] * 1e6);
+                                const py = Math.round(firstPt[1] * 1e6);
+                                fingerprint = fId != null
+                                    ? `id:${fId}`
+                                    : `coords:${px},${py},${type}`;
+                            }
+                        } catch (e) {}
+
+                        if (fingerprint !== null) {
+                            if (seenFeatureFingerprints.has(fingerprint)) continue;
+                            seenFeatureFingerprints.add(fingerprint);
+                        }
+
                         results.push({
                             feature: f,
-                            id: f.getId?.() || ('feat_' + results.length),
+                            id: fId != null ? fId : ('feat_' + results.length),
                             geometry: geom,
                             layer: layer,
                             source: src
@@ -257,7 +286,9 @@
         const seenErrorCoords = new Set();
 
         function addError(errorObj) {
-            const key = `${Math.round(errorObj.coord[0]*100)}_${Math.round(errorObj.coord[1]*100)}_${errorObj.type}`;
+            // FIX: Tăng độ chính xác key dedup lỗi lên 1e6 (~ 0.1 micro-degree)
+            // tránh collision giữa các điểm thực sự khác nhau nhưng gần nhau
+            const key = `${Math.round(errorObj.coord[0]*1e6)}_${Math.round(errorObj.coord[1]*1e6)}_${errorObj.type}`;
             if (seenErrorCoords.has(key)) return;
             seenErrorCoords.add(key);
             errors.push(errorObj);
