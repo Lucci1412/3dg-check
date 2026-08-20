@@ -368,6 +368,9 @@
     // ===== MOUSE INTERACTION HANDLERS =====
     function isUIElementClick(e) {
         if (!e || !e.target) return false;
+        // Click ngoài .ol-viewport (panel, nút UI...) → không phải click vẽ
+        const viewport = document.querySelector('.ol-viewport');
+        if (viewport && !viewport.contains(e.target)) return true;
         return !!(e.target.closest('#topo-checker-panel') || e.target.closest('#topo-fab-btn') || e.target.closest('.topo-area-bar'));
     }
 
@@ -888,17 +891,6 @@
 
         const scale = getMeterScaleFactor(cleanPoints[0]);
         const scaledDist = currentDistance * scale;
-        const renderSides = currentSide === 'both' ? ['right', 'left'] : [currentSide];
-
-        const landNameMap = {
-            'DGT': 'Đất công trình giao thông (DGT)',
-            'DTL': 'Đất công trình thủy lợi (DTL)',
-            'MNC': 'Đất có mặt nước chuyên dùng (MNC)',
-            'LUA': 'Đất trồng lúa (LUA)',
-            'CLN': 'Đất trồng cây lâu năm (CLN)',
-            'ONT': 'Đất ở tại nông thôn (ONT)',
-            'ODT': 'Đất ở tại đô thị (ODT)'
-        };
 
         const extraProps = {
             landType: currentLandType,
