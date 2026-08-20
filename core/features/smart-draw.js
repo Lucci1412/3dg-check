@@ -600,6 +600,28 @@
         return { primary: primarySource, sources: sources, sample: sampleLineFeature };
     }
 
+    // Lấy source trực tiếp từ Draw interaction (tin cậy hơn walk layer tree)
+    // vì App không đặt tên layer, findAllTargetLineSources có thể trả về source sai
+    function getDrawInteractionSource(map) {
+        if (!map) return null;
+        try {
+            const interactions = map.getInteractions().getArray();
+            for (const inter of interactions) {
+                if (inter.source_ && typeof inter.source_.addFeature === 'function'
+                    && inter.type_ === 'LineString') {
+                    return inter.source_;
+                }
+            }
+            for (const inter of interactions) {
+                if (inter.source_ && typeof inter.source_.addFeature === 'function'
+                    && typeof inter.source_.getFeatures === 'function') {
+                    return inter.source_;
+                }
+            }
+        } catch (e) {}
+        return null;
+    }
+
     function createOlStyleForFeature(color, width = 3.5, sampleFeature = null, map = null) {
         const ol = window.ol || window.openlayers;
         let StyleClass = ol?.style?.Style;
@@ -660,51 +682,39 @@
         if (!map || !clean || clean.length < 2) return null;
 
         const ol = window.ol || window.openlayers;
-        const { primary: targetSource, sources: allSources, sample: sampleFeature } = findAllTargetLineSources(map);
+        const { primary: layerSource, sources: allSources, sample: sampleFeature } = findAllTargetLineSources(map);
 
-        if (!targetSource && allSources.length === 0) {
+        // Ưu tiên dùng source từ Draw interaction trực tiếp (chính xác hơn walk layer tree)
+        const drawSource = getDrawInteractionSource(map);
+        const targetSource = drawSource || layerSource;
+
+        if (!targetSource) {
             log('No vector source available on map to insert feature.');
             return null;
         }
 
-        const landNameMap = {
-            'DGT': 'Đất công trình giao thông (DGT)',
-            'DTL': 'Đất công trình thủy lợi (DTL)',
-            'MNC': 'Đất có mặt nước chuyên dùng (MNC)',
-            'LUA': 'Đất trồng lúa (LUA)',
-            'CLN': 'Đất trồng cây lâu năm (CLN)',
-            'ONT': 'Đất ở tại nông thôn (ONT)',
-            'ODT': 'Đất ở tại đô thị (ODT)'
-        };
+        // Lấy sample feature để clone constructor
+        let resolvedSample = sampleFeature;
+        if (!resolvedSample && drawSource) {
+            const feats = drawSource.getFeatures();
+            if (feats.length > 0) resolvedSample = feats[0];
+        }
 
-        const activeType = extraProps.landType || currentLandType || 'DGT';
-        const activeColor = extraProps.color || currentColor || (activeType === 'DTL' ? '#aaffff' : '#ffaa32');
+        const activeColor = extraProps.color || currentColor || '#ffaa32';
         const strokeColor = activeColor;
-        const ogrStyle = `PEN(c:${strokeColor.toUpperCase()},w:2px)`;
-
         const featureId = generateUUID();
-        const featureName = (activeType === 'DTL') ? `Sông ${featureId.slice(0, 4)}` : `Đường ${featureId.slice(0, 4)}`;
 
-        // Native properties structure matching 3DG native features
-        // Each feature MUST have a unique name so 3DG React treats them as separate independent groups
-        const dgtFullProperties = {
-            color: strokeColor,
-            strokeColor: strokeColor,
-            stroke: strokeColor,
-            fill: strokeColor,
-            landType: activeType,
-            Layer: activeType,
-            OGR_STYLE: ogrStyle,
-            name: featureName
-        };
-
+        // Chỉ set đúng 2 properties mà native 3DG dùng: _editId + color
+        // KHÔNG set landType/Layer (3DG group select theo Layer)
         try {
             let feat = null;
             let newGeom = null;
 
-            if (sampleFeature && sampleFeature.getGeometry) {
-                const sampleGeom = sampleFeature.getGeometry();
-                if (sampleGeom && typeof sampleGeom.clone === 'function' && typeof sampleGeom.setCoordinates === 'function' && sampleGeom.getType?.() === 'LineString') {
+            if (resolvedSample && resolvedSample.getGeometry) {
+                const sampleGeom = resolvedSample.getGeometry();
+                if (sampleGeom && typeof sampleGeom.clone === 'function'
+                    && typeof sampleGeom.setCoordinates === 'function'
+                    && sampleGeom.getType?.() === 'LineString') {
                     try {
                         newGeom = sampleGeom.clone();
                         newGeom.setCoordinates(clean);
@@ -712,106 +722,61 @@
                 }
             }
 
-            if (!newGeom && ol && ol.Feature && ol.geom && ol.geom.LineString) {
+            if (!newGeom && resolvedSample) {
                 try {
-                    newGeom = new ol.geom.LineString(clean);
+                    const LineStringClass = resolvedSample.getGeometry()?.constructor;
+                    if (LineStringClass) {
+                        newGeom = new LineStringClass(clean, 'XY');
+                    }
                 } catch (e) {}
             }
 
-            if (sampleFeature) {
-                const FeatureClass = sampleFeature.constructor;
+            if (!newGeom && ol?.geom?.LineString) {
+                try { newGeom = new ol.geom.LineString(clean); } catch (e) {}
+            }
 
-                if (!newGeom) {
-                    try {
-                        const LineStringClass = sampleFeature.getGeometry()?.constructor;
-                        if (LineStringClass && LineStringClass.name !== 'Polygon') {
-                            newGeom = new LineStringClass(clean, 'XY');
-                        }
-                    } catch (e) {}
-                }
+            if (!newGeom) {
+                log('Cannot create LineString geometry.');
+                return null;
+            }
 
-                if (newGeom) {
-                    feat = new FeatureClass({ geometry: newGeom });
-                }
-            } else if (ol && ol.Feature && newGeom) {
-                feat = new ol.Feature({ geometry: newGeom });
+            const FeatureClass = resolvedSample?.constructor || ol?.Feature;
+            if (FeatureClass) {
+                try { feat = new FeatureClass({ geometry: newGeom }); } catch (e) {}
             }
 
             if (feat) {
                 try {
                     if (typeof feat.setId === 'function') feat.setId(featureId);
                     feat.id_ = featureId;
-                    feat._id = featureId;
-                    feat.id = featureId;
 
                     if (typeof feat.set === 'function') {
-                        // Only set color + name on the OL feature.
-                        // DO NOT set Layer/landType — 3DG groups-selects ALL features sharing the same Layer value.
-                        // Native 3DG lines have properties:null and are selected independently.
+                        feat.set('_editId', featureId);
                         feat.set('color', strokeColor);
                         feat.set('strokeColor', strokeColor);
-                        feat.set('stroke', strokeColor);
-                        feat.set('fill', strokeColor);
-                        feat.set('OGR_STYLE', ogrStyle);
-                        feat.set('name', featureName);
                     }
-                    if (typeof feat.setId === 'function') feat.setId(featureId);
 
-                    const customStyle = createOlStyleForFeature(strokeColor, 3.5, sampleFeature, map);
-
+                    const customStyle = createOlStyleForFeature(strokeColor, 3.5, resolvedSample, map);
                     if (customStyle && typeof feat.setStyle === 'function') {
                         feat.setStyle(customStyle);
                     }
 
-                    // Must add to ALL sources for feature to appear on map canvas (3DG uses multiple OL sources)
-                    // CRITICAL: do NOT call src.dispatchEvent manually — src.addFeature() already fires
-                    // 'addfeature' internally. Calling it again causes 3DG to process the feature multiple times
-                    // → duplicate panel entries → all activate together.
-                    allSources.forEach(src => {
+                    const existing = targetSource.getFeatureById ? targetSource.getFeatureById(featureId) : null;
+                    if (!existing) {
+                        targetSource.addFeature(feat);
+                    }
+
+                    if (layerSource && layerSource !== targetSource) {
                         try {
-                            if (src && typeof src.addFeature === 'function') {
-                                const existing = src.getFeatureById ? src.getFeatureById(featureId) : null;
-                                if (!existing) {
-                                    src.addFeature(feat); // OL fires 'addfeature' automatically here
-                                    if (typeof feat.setId === 'function') feat.setId(featureId);
-                                    feat.id_ = featureId;
-                                    feat._id = featureId;
-                                    feat.id = featureId;
-                                }
-                            }
+                            const ex2 = layerSource.getFeatureById ? layerSource.getFeatureById(featureId) : null;
+                            if (!ex2) layerSource.addFeature(feat);
                         } catch (e) {}
-                    });
+                    }
                 } catch (e) { }
             }
 
-            const geojsonFeat = {
-                type: 'Feature',
-                id: featureId,
-                geometry: {
-                    type: 'LineString',
-                    coordinates: clean
-                },
-                properties: dgtFullProperties
-            };
-
-            if (!feat && targetSource) {
-                const format = targetSource.getFormat ? targetSource.getFormat() : targetSource.format_;
-                if (format && typeof format.readFeature === 'function') {
-                    try {
-                        feat = format.readFeature(geojsonFeat);
-                        if (feat) {
-                            try { targetSource.addFeature(feat); } catch (e) {}
-                        }
-                    } catch (e) {}
-                }
-            }
-
-            // NOTE: Do NOT call __topoSyncFeatureToReactState here.
-            // The src.dispatchEvent({ type: 'addfeature', feature: feat }) above already
-            // triggers 3DG's native React state update. Calling sync manually creates a
-            // DUPLICATE panel entry with a different ID → "Tất cả (2)" for 1 feature → all activate together.
-            log(`✅ Saved LineString [${featureId}] into OpenLayers source (3DG will sync to React natively).`);
-            return feat || geojsonFeat;
+            log(`✅ Saved LineString [${featureId}] into Draw source.`);
+            return feat;
         } catch (e) {
             console.error('[SmartDrawer] Failed to add feature to OpenLayers map source:', e);
         }
@@ -940,13 +905,21 @@
             color: currentColor
         };
 
+        // Tìm Select interaction để deselect sau khi add xong
+        const allInteractions = map.getInteractions().getArray();
+        const selectInter = allInteractions.find(inter =>
+            typeof inter.getFeatures === 'function' &&
+            typeof inter.setActive === 'function'
+        );
+
         if (currentSide === 'both') {
             // For 'both': only create 2 offset lines (left + right), NO center line
             ['right', 'left'].forEach(side => {
                 const dist = side === 'left' ? -scaledDist : scaledDist;
                 let offsetCoords = computeParallelOffset(cleanPoints, dist);
-                const snappedOffset = snapOffsetLineCoords(map, offsetCoords, 25);
-                const cleanOffset = sanitizeCoords(snappedOffset);
+                // Không snap đường offset — snap 25px khi zoom out = nhiều mét thực
+                // → endpoint offset bị snap vào endpoint gốc → 2 đường trùng thành 1
+                const cleanOffset = sanitizeCoords(offsetCoords);
                 if (cleanOffset.length >= 2) {
                     addPolylineFeatureToMap(map, cleanOffset, extraProps);
                 }
@@ -956,40 +929,53 @@
             addPolylineFeatureToMap(map, cleanPoints, extraProps);
             const dist = currentSide === 'left' ? -scaledDist : scaledDist;
             let offsetCoords = computeParallelOffset(cleanPoints, dist);
-            const snappedOffset = snapOffsetLineCoords(map, offsetCoords, 25);
-            const cleanOffset = sanitizeCoords(snappedOffset);
+            // Không snap đường offset — tránh merge 2 đường thành 1 khi zoom out
+            const cleanOffset = sanitizeCoords(offsetCoords);
             if (cleanOffset.length >= 2) {
                 addPolylineFeatureToMap(map, cleanOffset, extraProps);
             }
         }
 
+        // Deselect: dispatch 'select' event để buộc 3DG React cập nhật selection state về empty
+        function forceDeselectViaEvent() {
+            try {
+                if (!selectInter) return;
+                const featColl = selectInter.getFeatures?.();
+                if (!featColl) return;
+                const deselected = featColl.getArray().slice();
+                featColl.clear();
+                if (deselected.length > 0) {
+                    try {
+                        selectInter.dispatchEvent({
+                            type: 'select',
+                            selected: [],
+                            deselected: deselected
+                        });
+                    } catch(e) {}
+                }
+                map.getInteractions().forEach(inter => {
+                    if (inter !== selectInter && typeof inter.getFeatures === 'function') {
+                        try { inter.getFeatures().clear(); } catch(e) {}
+                    }
+                });
+                map.render();
+            } catch(e) {}
+        }
+        setTimeout(forceDeselectViaEvent, 150);
+        setTimeout(forceDeselectViaEvent, 500);
+
         try {
             window.dispatchEvent(new CustomEvent('topo:features-updated'));
         } catch (e) { }
 
-        // Clean up any extra default web line ("Đường 9ade") created by 3DG native draw
+        // Clean up native BAN_VE line created by 3DG native draw (giữ trong setTimeout
+        // để tránh xóa trước khi feature của chúng ta được thêm vào)
         setTimeout(() => {
             cleanupNative3dgDefaultLine(map);
         }, 100);
         setTimeout(() => {
             cleanupNative3dgDefaultLine(map);
         }, 400);
-
-        // Clear OL Select interaction so newly added features don't appear auto-highlighted/thick
-        // 3DG auto-selects the last addfeature — we deselect it immediately after
-        function clearOlSelection() {
-            try {
-                map.getInteractions().forEach(interaction => {
-                    if (typeof interaction.getFeatures === 'function') {
-                        try { interaction.getFeatures().clear(); } catch(e) {}
-                    }
-                });
-                // Also try clicking outside to deselect via 3DG's own UI
-                if (typeof map.render === 'function') map.render();
-            } catch(e) {}
-        }
-        setTimeout(clearOlSelection, 150);
-        setTimeout(clearOlSelection, 500);
 
         // Reset points for NEXT line, keeping drawer active for continuous parallel line drawing!
         activePoints = [];
