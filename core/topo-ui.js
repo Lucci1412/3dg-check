@@ -766,20 +766,46 @@
     }
 
     // ===== EXECUTE TOPOLOGY SCAN =====
-    function executeScan() {
+    async function executeScan() {
         const scanBtn = document.getElementById('topo-btn-scan');
         const statsText = document.getElementById('topo-stats-text');
+        const statsEl = document.getElementById('topo-stats');
         const fabBadge = document.getElementById('topo-fab-badge');
 
         const tolerance = window.__topoConfig?.defaultTolerance || 0.5;
 
         scanBtn.disabled = true;
-        scanBtn.innerHTML = `<span>⏳ Đang quét dữ liệu...</span>`;
-        statsText.textContent = `Đang quét dữ liệu bản đồ...`;
+        scanBtn.innerHTML = `<span>⏳ Đang quét...</span>`;
 
-        setTimeout(() => {
+        if (statsEl) statsEl.style.display = 'block';
+
+        const updateProgress = (pct, msg) => {
+            const clamped = Math.min(100, Math.max(0, Math.round(pct)));
+            if (statsText) {
+                statsText.innerHTML = `
+                    <div class="topo-progress-container">
+                        <div class="topo-progress-info">
+                            <span class="topo-progress-label">${msg || 'Đang quét dữ liệu bản đồ...'}</span>
+                            <span class="topo-progress-percent">${clamped}%</span>
+                        </div>
+                        <div class="topo-progress-track">
+                            <div class="topo-progress-fill" style="width: ${clamped}%"></div>
+                        </div>
+                    </div>
+                `;
+            }
+        };
+
+        updateProgress(0, 'Đang chuẩn bị quét dữ liệu...');
+
+        try {
             if (window.__topoRunCheck) {
-                currentErrors = window.__topoRunCheck({ tolerance });
+                currentErrors = await window.__topoRunCheck({
+                    tolerance,
+                    onProgress: async (percent, statusText) => {
+                        updateProgress(percent, statusText);
+                    }
+                });
                 renderErrorList(currentErrors);
 
                 if (currentErrors.length > 0) {
@@ -789,12 +815,15 @@
                     fabBadge.style.display = 'none';
                 }
             } else {
-                statsText.textContent = `❌ Lỗi: Chưa nạp được Engine kiểm tra!`;
+                if (statsText) statsText.textContent = `❌ Lỗi: Chưa nạp được Engine kiểm tra!`;
             }
-
+        } catch (err) {
+            console.error('[CheckTopo] Error during scan:', err);
+            if (statsText) statsText.innerHTML = `<span class="topo-text-danger">❌ Lỗi khi quét: ${err.message || err}</span>`;
+        } finally {
             scanBtn.disabled = false;
             scanBtn.innerHTML = `<span>Check Topo</span>`;
-        }, 100);
+        }
     }
 
     function clearTopologyCheckResults() {
@@ -877,38 +906,61 @@
 
         listEl.innerHTML = '';
 
-        errors.forEach((err, idx) => {
-            const item = document.createElement('div');
-            item.className = 'topo-error-item';
-            if (err.type === 'duplicate') item.classList.add('--duplicate');
-            if (err.id === activeErrorId) item.classList.add('--active');
+        let renderedIndex = 0;
+        const BATCH_SIZE = 50;
 
-            const x = err.coord[0].toFixed(2);
-            const y = err.coord[1].toFixed(2);
+        function renderNextBatch() {
+            if (renderedIndex >= errors.length) return;
+            const fragment = document.createDocumentFragment();
+            const endIdx = Math.min(renderedIndex + BATCH_SIZE, errors.length);
 
-            if (err.type === 'duplicate') {
-                item.innerHTML = `
-                    <div class="topo-item-title topo-title-dup">🟧 Lỗi ${idx + 1}: Trùng nét</div>
-                    <div class="topo-item-coord">Tọa độ: [${x}, ${y}]</div>
-                `;
-            } else {
-                item.innerHTML = `
-                    <div class="topo-item-title">🔴 Lỗi ${idx + 1}: Chưa khép thửa</div>
-                    <div class="topo-item-coord">Tọa độ: [${x}, ${y}]</div>
-                `;
+            for (let idx = renderedIndex; idx < endIdx; idx++) {
+                const err = errors[idx];
+                const item = document.createElement('div');
+                item.className = 'topo-error-item';
+                if (err.type === 'duplicate') item.classList.add('--duplicate');
+                if (err.id === activeErrorId) item.classList.add('--active');
+
+                const x = err.coord[0].toFixed(2);
+                const y = err.coord[1].toFixed(2);
+
+                if (err.type === 'duplicate') {
+                    item.innerHTML = `
+                        <div class="topo-item-title topo-title-dup">🟧 Lỗi ${idx + 1}: Trùng nét</div>
+                        <div class="topo-item-coord">Tọa độ: [${x}, ${y}]</div>
+                    `;
+                } else {
+                    item.innerHTML = `
+                        <div class="topo-item-title">🔴 Lỗi ${idx + 1}: Chưa khép thửa</div>
+                        <div class="topo-item-coord">Tọa độ: [${x}, ${y}]</div>
+                    `;
+                }
+
+                item.addEventListener('click', () => {
+                    selectAndZoomError(err, item);
+                });
+
+                item.addEventListener('dblclick', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
+
+                fragment.appendChild(item);
             }
 
-            item.addEventListener('click', () => {
-                selectAndZoomError(err, item);
-            });
+            listEl.appendChild(fragment);
+            renderedIndex = endIdx;
+        }
 
-            item.addEventListener('dblclick', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-            });
+        // Render đợt đầu tiên 50 lỗi (tải tức thì < 2ms)
+        renderNextBatch();
 
-            listEl.appendChild(item);
-        });
+        // Tự động tải thêm khi cuộn gần tới đáy danh sách
+        listEl.onscroll = () => {
+            if (listEl.scrollTop + listEl.clientHeight >= listEl.scrollHeight - 150) {
+                renderNextBatch();
+            }
+        };
 
         // Automatically scroll smoothly and stretch panel height
         setTimeout(() => {

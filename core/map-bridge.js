@@ -115,7 +115,9 @@
         return isDisabled;
     }
 
-    function drawDuplicateHighlightsCanvas() {
+    let storedDanglePoints = [];
+
+    function drawAllHighlightsCanvas() {
         const map = window.__topoMap || findOlMap();
         const canvas = getOrCreateHighlightCanvas();
         if (!canvas || !map) return;
@@ -123,19 +125,25 @@
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        const view = map.getView();
+        const extent = view ? view.calculateExtent() : null;
+
+        function isInExtent(pt) {
+            if (!extent || !pt) return true;
+            return pt[0] >= extent[0] && pt[0] <= extent[2] && pt[1] >= extent[1] && pt[1] <= extent[3];
+        }
+
         function drawEndpointGlowingDot(pt, colorRing, colorDot, isLarge = false) {
             if (!pt) return;
             const px = map.getPixelFromCoordinate(pt);
             if (!px || isNaN(px[0]) || isNaN(px[1])) return;
 
             ctx.save();
-            // Outer ring (lightweight semi-transparent fill instead of costly shadowBlur)
             ctx.beginPath();
-            ctx.arc(px[0], px[1], isLarge ? 14 : 9, 0, Math.PI * 2);
+            ctx.arc(px[0], px[1], isLarge ? 12 : 8, 0, Math.PI * 2);
             ctx.fillStyle = colorRing;
             ctx.fill();
 
-            // Inner dot
             ctx.beginPath();
             ctx.arc(px[0], px[1], isLarge ? 6 : 4, 0, Math.PI * 2);
             ctx.fillStyle = colorDot;
@@ -146,28 +154,66 @@
             ctx.restore();
         }
 
-        // 1. Chỉ làm sáng ở 2 đầu mút của các đoạn trùng nét (Ưu tiên làm sáng đoạn ngắn hơn trên cùng)
+        // 1. Vẽ các điểm hở ranh (Dangle) trực tiếp lên Canvas (siêu nhẹ, 60fps)
+        if (storedDanglePoints && storedDanglePoints.length > 0) {
+            ctx.save();
+            for (const pt of storedDanglePoints) {
+                if (!isInExtent(pt)) continue;
+                const px = map.getPixelFromCoordinate(pt);
+                if (!px || isNaN(px[0]) || isNaN(px[1])) continue;
+
+                ctx.beginPath();
+                ctx.arc(px[0], px[1], 4.5, 0, Math.PI * 2);
+                ctx.fillStyle = '#ff1100';
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        // 2. Vẽ các điểm trùng nét (1 đầu mút) lên Canvas
         if (storedDuplicateSegments && storedDuplicateSegments.length > 0) {
-            // Sắp xếp dài trước -> ngắn sau để các đoạn ngắn được vẽ đè lên trên cùng!
             const sortedSegs = [...storedDuplicateSegments].sort((a, b) => (b.length || 0) - (a.length || 0));
 
             sortedSegs.forEach(seg => {
                 if (disabledHighlightIds.has(seg.id)) return;
                 const pts = seg.pathCoords || (seg.p1 && seg.p2 ? [seg.p1, seg.p2] : null);
-                if (pts && pts.length >= 2) {
-                    const isShort = (seg.length || 0) < 30; // Đoạn ngắn dưới 30m phát sáng nổi bật hơn
+                if (pts && pts.length >= 1) {
+                    if (!isInExtent(pts[0])) return;
+                    const isShort = (seg.length || 0) < 30;
                     drawEndpointGlowingDot(pts[0], isShort ? 'rgba(234, 88, 12, 0.45)' : 'rgba(245, 158, 11, 0.35)', isShort ? '#ffed4a' : '#fbbf24', isShort);
-                    drawEndpointGlowingDot(pts[pts.length - 1], isShort ? 'rgba(234, 88, 12, 0.45)' : 'rgba(245, 158, 11, 0.35)', isShort ? '#ffed4a' : '#fbbf24', isShort);
                 }
             });
         }
 
-        // 2. Làm sáng 2 đầu mút của đoạn trùng đang được chọn trong danh sách lỗi
+        // 3. Làm sáng đoạn trùng đang được chọn trong danh sách lỗi
         if (activeDuplicateSegment && !disabledHighlightIds.has(activeDuplicateSegment.id)) {
             const pts = activeDuplicateSegment.pathCoords || (activeDuplicateSegment.p1 && activeDuplicateSegment.p2 ? [activeDuplicateSegment.p1, activeDuplicateSegment.p2] : null);
-            if (pts && pts.length >= 2) {
+            if (pts && pts.length >= 1) {
                 drawEndpointGlowingDot(pts[0], 'rgba(239, 68, 68, 0.55)', '#ffffff', true);
-                drawEndpointGlowingDot(pts[pts.length - 1], 'rgba(239, 68, 68, 0.55)', '#ffffff', true);
+            }
+        }
+
+        // 4. Vẽ điểm Active khi click chọn lỗi
+        if (activeErrorCoord && isInExtent(activeErrorCoord)) {
+            const px = map.getPixelFromCoordinate(activeErrorCoord);
+            if (px && !isNaN(px[0]) && !isNaN(px[1])) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(px[0], px[1], 10, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255, 0, 68, 0.3)';
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(px[0], px[1], 6, 0, Math.PI * 2);
+                ctx.fillStyle = '#ff0044';
+                ctx.fill();
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
             }
         }
     }
@@ -186,7 +232,7 @@
         const map = window.__topoMap || findOlMap();
         if (!map) return;
 
-        if (!storedErrorItems.length && !storedDuplicateSegments.length && !activeDuplicateSegment) {
+        if (!storedDanglePoints.length && !storedDuplicateSegments.length && !activeDuplicateSegment && !activeErrorCoord) {
             const canvas = document.getElementById('topo-line-highlight-canvas');
             if (canvas) {
                 const ctx = canvas.getContext('2d');
@@ -195,39 +241,12 @@
             return;
         }
 
-        if (storedErrorItems.length) {
-            const container = getOrCreateMarkerLayerDiv();
-            if (container) {
-                storedErrorItems.forEach(item => {
-                    try {
-                        const pixel = map.getPixelFromCoordinate(item.coord);
-                        if (pixel && !isNaN(pixel[0]) && !isNaN(pixel[1])) {
-                            if (item.element) {
-                                item.element.style.left = pixel[0] + 'px';
-                                item.element.style.top = pixel[1] + 'px';
-                                item.element.style.display = 'block';
-                            }
-                            if (item.activeElement) {
-                                item.activeElement.style.left = pixel[0] + 'px';
-                                item.activeElement.style.top = pixel[1] + 'px';
-                                item.activeElement.style.display = 'block';
-                            }
-                        } else {
-                            if (item.element) item.element.style.display = 'none';
-                            if (item.activeElement) item.activeElement.style.display = 'none';
-                        }
-                    } catch (e) {}
-                });
-            }
-        }
-
-        drawDuplicateHighlightsCanvas();
+        drawAllHighlightsCanvas();
     }
 
     function attachMapRenderListeners(map) {
         if (isListenerAttached || !map) return;
         isListenerAttached = true;
-
         try {
             map.on('postrender', scheduleUpdateMarkerPositions);
         } catch(e) {}
@@ -274,6 +293,7 @@
             const ctx = canvas.getContext('2d');
             ctx.clearRect(0, 0, canvas.width, canvas.height);
         }
+        storedDanglePoints = [];
         storedErrorItems = [];
         storedDuplicateSegments = [];
         activeDuplicateSegment = null;
@@ -281,7 +301,7 @@
         detachMapRenderListeners();
     }
 
-    // Hiển thị bóng đèn & highlight line cho TẤT CẢ các lỗi trên bản đồ
+    // Hiển thị highlight cho TẤT CẢ các lỗi trên bản đồ (100% Canvas GPU, 60fps)
     function renderAllErrorOverlays(errors) {
         const map = window.__topoMap || findOlMap();
         if (!map) return;
@@ -291,10 +311,33 @@
         if (!errors || errors.length === 0) return;
 
         attachMapRenderListeners(map);
-        const container = getOrCreateMarkerLayerDiv();
-        if (!container) return;
 
-        errors.forEach((err, idx) => {
+        // Thu thập các điểm đầu sáng và tọa độ của đoạn trùng nét
+        const dupLitPoints = [];
+        errors.forEach(err => {
+            if (err.type === 'duplicate') {
+                const pts = err.pathCoords || (err.segment ? err.segment : null);
+                if (pts && pts.length > 0) {
+                    dupLitPoints.push(pts[0]);
+                }
+                if (err.coord) {
+                    dupLitPoints.push(err.coord);
+                }
+            }
+        });
+
+        function isNearDupLitPoint(coord, tol = 1.0) {
+            if (!coord || !dupLitPoints.length) return false;
+            const tolSq = tol * tol;
+            for (const dp of dupLitPoints) {
+                const dx = coord[0] - dp[0];
+                const dy = coord[1] - dp[1];
+                if (dx * dx + dy * dy <= tolSq) return true;
+            }
+            return false;
+        }
+
+        errors.forEach((err) => {
             if (err.type === 'duplicate') {
                 storedDuplicateSegments.push({
                     p1: err.segment ? err.segment[0] : err.coord,
@@ -303,37 +346,19 @@
                     id: err.id,
                     length: err.length || 0
                 });
+            } else if (err.type === 'dangle') {
+                // Nếu điểm hở ranh trùng với đầu sáng của trùng nét -> ưu tiên chỉ sáng trùng nét
+                if (!isNearDupLitPoint(err.coord, 1.0)) {
+                    storedDanglePoints.push(err.coord);
+                }
             }
-
-            const el = document.createElement('div');
-            el.className = err.type === 'duplicate' ? 'topo-marker-bulb-container topo-marker-duplicate-container' : 'topo-marker-bulb-container';
-            el.style.position = 'absolute';
-
-            if (err.type === 'duplicate') {
-                el.innerHTML = `
-                    <div class="topo-marker-bulb-ring topo-marker-dup-ring"></div>
-                    <div class="topo-marker-bulb-dot topo-marker-dup-dot" title="Lỗi #${idx + 1}: ${err.title} - ${err.description}"></div>
-                `;
-            } else {
-                el.innerHTML = `
-                    <div class="topo-marker-bulb-ring"></div>
-                    <div class="topo-marker-bulb-dot" title="Lỗi #${idx + 1}: ${err.title}"></div>
-                `;
-            }
-            container.appendChild(el);
-
-            storedErrorItems.push({
-                coord: err.coord,
-                element: el,
-                type: err.type
-            });
         });
 
         updateMarkerPositions();
-        log(`Rendered ${storedErrorItems.length} error overlays (${storedDuplicateSegments.length} duplicate line highlights) on map.`);
+        log(`Rendered ${storedDanglePoints.length} dangles & ${storedDuplicateSegments.length} duplicates on Canvas.`);
     }
 
-    // Highlight lỗi được chọn (Zoom tới & hiển thị vòng hào quang lớn hơn / sáng line trùng)
+    // Highlight lỗi được chọn (Zoom tới & hiển thị vòng hào quang trên canvas)
     function highlightErrorLocation(coord, errorObj = null) {
         const map = window.__topoMap || findOlMap();
         if (!map) return;
@@ -352,34 +377,6 @@
         }
 
         attachMapRenderListeners(map);
-        const container = getOrCreateMarkerLayerDiv();
-        if (!container) return;
-
-        const oldActive = container.querySelector('.topo-marker-active-container');
-        if (oldActive) oldActive.remove();
-
-        const el = document.createElement('div');
-        el.className = 'topo-marker-active-container';
-        el.style.position = 'absolute';
-        el.innerHTML = `
-            <div class="topo-marker-active-ring"></div>
-            <div class="topo-marker-active-ring-inner"></div>
-            <div class="topo-marker-active-dot"></div>
-        `;
-        container.appendChild(el);
-
-        let found = storedErrorItems.find(i => Math.abs(i.coord[0] - coord[0]) < 1e-4 && Math.abs(i.coord[1] - coord[1]) < 1e-4);
-        if (found) {
-            found.activeElement = el;
-        } else {
-            storedErrorItems.push({
-                coord: coord,
-                element: el,
-                activeElement: el,
-                type: errorObj?.type || 'active'
-            });
-        }
-
         updateMarkerPositions();
     }
 
