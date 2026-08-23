@@ -56,6 +56,29 @@
     // Unsubscribe functions for the live addfeature guard.
     let guardUnsubscribers = [];
 
+    // ===== PERFORMANCE: cached sources + cached computed geometry =====
+    // Re-walking the whole layer tree and re-snapping against every vertex
+    // of every feature (e.g. 2000 lines) on EVERY pan/zoom postrender frame
+    // was the main cause of lag. We now:
+    //   (a) cache the target sources once per draw session, and
+    //   (b) only recompute offset/snap geometry when activePoints or
+    //       currentMouseCoord actually change — panning just re-projects
+    //       the already-computed map coords to pixels (cheap).
+    let cachedSourcesResult = null; // { primary, sources, sample }
+    let cachedGeometry = { cleanFull: [], offsets: {} }; // side -> coords[]
+    let rafPending = false;
+
+    function getCachedSources(map) {
+        if (!cachedSourcesResult) {
+            cachedSourcesResult = findAllTargetLineSources(map);
+        }
+        return cachedSourcesResult;
+    }
+
+    function invalidateSourcesCache() {
+        cachedSourcesResult = null;
+    }
+
     function setLandTypeAndColor(type, color) {
         if (type) currentLandType = type;
         if (color) currentColor = color;
@@ -184,7 +207,37 @@
         }
     }
 
+    // ===== PERF: recompute offset/snap geometry only when it can actually
+    // change (points added, mouse moved) — NOT on every pan/zoom postrender.
+    // renderSmartDrawCanvas below only re-projects these cached map coords
+    // to screen pixels, which is cheap even during pan animation.
+    function recomputeActiveGeometry(map) {
+        if (!map) return;
+        const fullCoords = [...activePoints];
+        if (currentMouseCoord) {
+            fullCoords.push(currentMouseCoord);
+        }
+        const cleanFull = sanitizeCoords(fullCoords);
+        cachedGeometry.cleanFull = cleanFull;
+        cachedGeometry.offsets = {};
+
+        if (cleanFull.length >= 2) {
+            const scale = getMeterScaleFactor(cleanFull[0]);
+            const scaledDist = currentDistance * scale;
+            const sides = currentSide === 'both' ? ['right', 'left'] : [currentSide];
+
+            sides.forEach(side => {
+                const dist = side === 'left' ? -scaledDist : scaledDist;
+                const offsetCoords = computeParallelOffset(cleanFull, dist);
+                const snappedOffset = snapOffsetLineCoords(map, offsetCoords, 25);
+                cachedGeometry.offsets[side] = sanitizeCoords(snappedOffset);
+            });
+        }
+    }
+
     // ===== RENDER LIVE CANVAS PREVIEW =====
+    // PERF: pure re-projection of cached map coords to screen pixels — no
+    // snapping, no feature iteration happens here. Safe to call every frame.
     function renderSmartDrawCanvas() {
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         const canvas = getOrCreateCanvasOverlay();
@@ -195,13 +248,8 @@
 
         if (activePoints.length === 0) return;
 
-        const fullCoords = [...activePoints];
-        if (currentMouseCoord) {
-            fullCoords.push(currentMouseCoord);
-        }
-
-        const cleanFull = sanitizeCoords(fullCoords);
-        if (cleanFull.length < 1) return;
+        const cleanFull = cachedGeometry.cleanFull;
+        if (!cleanFull || cleanFull.length < 1) return;
 
         const pixels = cleanFull.map(pt => map.getPixelFromCoordinate(pt)).filter(p => p && !isNaN(p[0]) && !isNaN(p[1]));
         if (pixels.length === 0) return;
@@ -233,18 +281,12 @@
             ctx.stroke();
         });
 
-        // 2. Compute & Draw Parallel Offset Line 2
+        // 2. Draw Parallel Offset Line(s) from cached geometry (no recompute here)
         if (cleanFull.length >= 2) {
-            const scale = getMeterScaleFactor(cleanFull[0]);
-            const scaledDist = currentDistance * scale;
-
             const renderSides = currentSide === 'both' ? ['right', 'left'] : [currentSide];
 
             renderSides.forEach(side => {
-                const dist = side === 'left' ? -scaledDist : scaledDist;
-                let offsetCoords = computeParallelOffset(cleanFull, dist);
-                const snappedOffset = snapOffsetLineCoords(map, offsetCoords, 25);
-                const cleanOffset = sanitizeCoords(snappedOffset);
+                const cleanOffset = cachedGeometry.offsets[side] || [];
                 const offsetPixels = cleanOffset.map(pt => map.getPixelFromCoordinate(pt)).filter(p => p && !isNaN(p[0]) && !isNaN(p[1]));
 
                 if (offsetPixels.length >= 2) {
@@ -335,6 +377,11 @@
     }
 
     // ===== VERTEX SNAPPING UTILITY =====
+    // PERF: was iterating ALL features + ALL vertices on the map for every
+    // call (O(total map vertices) per mousemove/frame — brutal at ~2000
+    // lines). Now uses OpenLayers' built-in R-tree via getFeaturesInExtent()
+    // to only look at features whose bounding box is near the cursor, then
+    // only checks vertices of those nearby features.
     function getSnappedCoordinate(map, rawCoord, pxThreshold = 20) {
         if (!map || !rawCoord) return { coord: rawCoord, isSnapped: false };
         const mousePx = map.getPixelFromCoordinate(rawCoord);
@@ -344,11 +391,36 @@
         let minPxDist = pxThreshold;
         let isSnapped = false;
 
-        const { sources } = findAllTargetLineSources(map);
+        const view = map.getView();
+        const resolution = view ? view.getResolution() : 1;
+        // Convert the pixel search radius into map units so we can build a
+        // small search extent instead of scanning the whole source.
+        const bufferMapUnits = pxThreshold * (resolution || 1) * 1.5; // small margin
+        const searchExtent = [
+            rawCoord[0] - bufferMapUnits,
+            rawCoord[1] - bufferMapUnits,
+            rawCoord[0] + bufferMapUnits,
+            rawCoord[1] + bufferMapUnits
+        ];
+
+        const { sources } = getCachedSources(map);
         sources.forEach(src => {
-            if (!src || !src.getFeatures) return;
-            const features = src.getFeatures();
-            features.forEach(f => {
+            if (!src) return;
+
+            let nearbyFeatures;
+            if (typeof src.getFeaturesInExtent === 'function') {
+                try {
+                    nearbyFeatures = src.getFeaturesInExtent(searchExtent);
+                } catch (e) {
+                    nearbyFeatures = src.getFeatures ? src.getFeatures() : [];
+                }
+            } else if (src.getFeatures) {
+                nearbyFeatures = src.getFeatures();
+            } else {
+                return;
+            }
+
+            nearbyFeatures.forEach(f => {
                 const geom = f.getGeometry?.();
                 if (!geom) return;
                 const type = geom.getType?.();
@@ -473,14 +545,24 @@
 
             lastClickInfo = { time: now, pos: { x: e.clientX, y: e.clientY } };
             activePoints.push(coord);
+            recomputeActiveGeometry(map); // point set changed -> recompute offset/snap once
             renderSmartDrawCanvas();
             document.dispatchEvent(new CustomEvent('topo:area-point-added', { detail: { count: activePoints.length } }));
             log(`Added point #${activePoints.length}: [${coord[0].toFixed(2)}, ${coord[1].toFixed(2)}]`);
         }
     }
 
-    function onMouseMove(e) {
-        if (!isSmartDrawing || activePoints.length === 0 || isUIElementClick(e)) return;
+    // PERF: mousemove can fire dozens of times per second. We throttle the
+    // (now cheap, but still non-zero) snap lookup + geometry recompute to
+    // one per animation frame via requestAnimationFrame, instead of doing
+    // full work on every single native mousemove event.
+    let pendingMouseEvent = null;
+
+    function processPendingMouseMove() {
+        rafPending = false;
+        const e = pendingMouseEvent;
+        pendingMouseEvent = null;
+        if (!e || !isSmartDrawing || activePoints.length === 0) return;
 
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         const canvas = getOrCreateCanvasOverlay();
@@ -494,7 +576,17 @@
             const snapRes = getSnappedCoordinate(map, rawCoord, 20);
             currentMouseCoord = snapRes.coord;
             lastSnapInfo = snapRes;
+            recomputeActiveGeometry(map); // mouse moved -> geometry may change
             renderSmartDrawCanvas();
+        }
+    }
+
+    function onMouseMove(e) {
+        if (!isSmartDrawing || activePoints.length === 0 || isUIElementClick(e)) return;
+        pendingMouseEvent = e;
+        if (!rafPending) {
+            rafPending = true;
+            requestAnimationFrame(processPendingMouseMove);
         }
     }
 
@@ -1082,6 +1174,10 @@
         lastClickInfo = { time: 0, pos: null };
         mouseDownPos = null;
         justFinishedTime = Date.now();
+        cachedGeometry = { cleanFull: [], offsets: {} }; // reset for next line
+        // Feature set changed (we just added lines) — drop the sources cache
+        // so the next snap lookup picks up the newly added features too.
+        invalidateSourcesCache();
         clearCanvas();
 
         log('✅ Finish Smart Drawing complete and features saved. Ready for NEXT line!');
@@ -1103,6 +1199,8 @@
         lastClickInfo = { time: 0, pos: null };
         mouseDownPos = null;
         ourFeatureIds = new Set();
+        cachedGeometry = { cleanFull: [], offsets: {} };
+        invalidateSourcesCache(); // fresh session -> fresh source list
 
         currentDistance = options.distance || 5.0;
         currentSide = options.side || 'right';
@@ -1131,6 +1229,10 @@
         currentMouseCoord = null;
         lastClickInfo = { time: 0, pos: null };
         mouseDownPos = null;
+        cachedGeometry = { cleanFull: [], offsets: {} };
+        invalidateSourcesCache();
+        pendingMouseEvent = null;
+        rafPending = false;
 
         detachEventListeners();
         detachStrayLineGuards();
