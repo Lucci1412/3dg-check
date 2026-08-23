@@ -11,6 +11,7 @@ const scripts = [
     'core/features/area-delete.js',
     'core/features/area-color.js',
     'core/features/smart-draw.js',
+    'core/features/cut-line.js',
     'core/topo-ui.js'
 ];
 

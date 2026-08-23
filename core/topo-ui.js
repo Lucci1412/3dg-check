@@ -64,6 +64,9 @@
                         <button class="topo-btn-secondary" id="topo-btn-smart-draw" title="Tự động vẽ đường chính & đường song song (Smart Drawer)">
                             <span>Vẽ Đường</span>
                         </button>
+                        <button class="topo-btn-secondary" id="topo-btn-cut-line" title="Cắt nét vẽ thành các đoạn khi đi qua đường cắt (Cut Stroke)">
+                            <span>Cắt Nét</span>
+                        </button>
                         <button class="topo-btn-secondary" id="topo-btn-area-color">
                             <span>Đổi Màu Vùng</span>
                         </button>
@@ -195,6 +198,7 @@
         const body = document.getElementById('topo-body');
         const scanBtn = document.getElementById('topo-btn-scan');
         const smartDrawBtn = document.getElementById('topo-btn-smart-draw');
+        const cutLineBtn = document.getElementById('topo-btn-cut-line');
 
         // 1. Minimize button (—)
         if (minimizeBtn && body) {
@@ -232,11 +236,11 @@
         const areaConfirmBtn = document.getElementById('topo-btn-area-confirm');
         const areaCancelBtn = document.getElementById('topo-btn-area-cancel');
 
-        let currentAreaMode = 'delete'; // 'delete' or 'color'
+        let currentAreaMode = 'delete'; // 'delete', 'color', 'smart-draw', or 'cut-line'
 
         function setActiveModeButton(activeId) {
-            if (!scanBtn || !smartDrawBtn || !areaColorBtn || !areaDeleteBtn) return;
-            [scanBtn, smartDrawBtn, areaColorBtn, areaDeleteBtn].forEach(btn => {
+            if (!scanBtn || !smartDrawBtn || !cutLineBtn || !areaColorBtn || !areaDeleteBtn) return;
+            [scanBtn, smartDrawBtn, cutLineBtn, areaColorBtn, areaDeleteBtn].forEach(btn => {
                 if (btn.id === activeId) {
                     btn.classList.remove('topo-btn-secondary');
                     btn.classList.add('topo-btn-primary');
@@ -245,6 +249,17 @@
                     btn.classList.add('topo-btn-secondary');
                 }
             });
+
+            if (cutLineBtn) {
+                const span = cutLineBtn.querySelector('span') || cutLineBtn;
+                if (activeId === 'topo-btn-cut-line') {
+                    span.textContent = 'Hủy Cắt Nét';
+                    cutLineBtn.title = 'Nhấp để hủy chế độ cắt nét vẽ';
+                } else {
+                    span.textContent = 'Cắt Nét';
+                    cutLineBtn.title = 'Cắt nét vẽ thành các đoạn khi đi qua đường cắt (Cut Stroke)';
+                }
+            }
         }
 
         function animatePanelHeightToContent() {
@@ -295,9 +310,15 @@
 
         function cancelAllInteractiveModes() {
             if (window.__smartDrawerStop) window.__smartDrawerStop();
+            if (window.__cutLineStop) window.__cutLineStop();
             if (window.__areaDeleterCancel) window.__areaDeleterCancel();
             if (window.__areaColorizerHidePopover) window.__areaColorizerHidePopover();
             if (areaBar) areaBar.classList.add('topo-drawer-hidden');
+            if (cutLineBtn) {
+                const span = cutLineBtn.querySelector('span') || cutLineBtn;
+                span.textContent = 'Cắt Nét';
+                cutLineBtn.title = 'Cắt nét vẽ thành các đoạn khi đi qua đường cắt (Cut Stroke)';
+            }
             setSmartDrawControlsVisible(false);
             currentAreaMode = null;
             setUIVisibilityMode('scan');
@@ -552,6 +573,44 @@
             });
         }
 
+        // 7. Cut Line button (Cắt Nét Vẽ)
+        if (cutLineBtn) {
+            cutLineBtn.addEventListener('click', () => {
+                if (cutLineBtn.disabled) return;
+
+                // Nếu tính năng Cắt Nét đang BẬT -> Click lần nữa sẽ TẮT
+                if (currentAreaMode === 'cut-line') {
+                    cancelAllInteractiveModes();
+                    setActiveModeButton('topo-btn-scan');
+                    setUIVisibilityMode('scan');
+                    return;
+                }
+
+                // Nếu tính năng chưa bật -> BẬT CẮT NÉT
+                cancelAllInteractiveModes();
+                setUIVisibilityMode('interactive');
+                setActiveModeButton('topo-btn-cut-line');
+                currentAreaMode = 'cut-line';
+                setSmartDrawControlsVisible(false);
+
+                ensureNative3dgSelectEditModeActive();
+
+                if (window.__cutLineStart) {
+                    const ok = window.__cutLineStart();
+                    if (ok && areaBar) {
+                        areaBar.classList.remove('topo-drawer-hidden');
+                        if (areaStatus) areaStatus.textContent = '✂️ Chọn 2 điểm trên map (hoặc nhấp đúp) để cắt nét vẽ...';
+                        if (areaFinishBtn) {
+                            areaFinishBtn.style.display = 'inline-flex';
+                            areaFinishBtn.textContent = '✓ Hoàn Thành Cắt';
+                            areaFinishBtn.disabled = true;
+                        }
+                        if (areaConfirmBtn) areaConfirmBtn.style.display = 'none';
+                    }
+                }
+            });
+        }
+
         // ===== AREA SELECTION (COLOR vs DELETE) =====
         if (areaColorBtn) {
             areaColorBtn.addEventListener('click', () => {
@@ -624,6 +683,10 @@
             areaFinishBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
+                if (currentAreaMode === 'cut-line') {
+                    if (window.__cutLineFinish) window.__cutLineFinish();
+                    return;
+                }
                 if (currentAreaMode === 'smart-draw') {
                     if (window.__smartDrawerFinish) window.__smartDrawerFinish();
                     cancelAllInteractiveModes();
