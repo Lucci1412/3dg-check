@@ -4,12 +4,36 @@
 // - Fast Double-Click & End-Vertex Click Finish
 // - Supports DGT, DTL, MNC, LUA, CLN land types & custom stroke colors
 // - Synchronizes with OpenLayers map sources & 3DG React State
+//
+// PATCHED VERSION — fixes "3 lines instead of 2" issue:
+//   1. cleanupNative3dgDefaultLine no longer crashes/silently skips when
+//      `color` property is not a string (was throwing inside forEach and
+//      being swallowed by try/catch, so some native lines were never removed).
+//   2. Added strict "ownership" tracking: every feature WE add during
+//      finishSmartDrawing() is recorded by its _editId. Cleanup now removes
+//      any LineString in the target sources that is NOT one of ours and has
+//      no landType — regardless of its color/name/Layer wording — instead of
+//      relying on fragile string matching.
+//   3. addPolylineFeatureToMap now also sets `landType` on the feature (it
+//      was being passed in extraProps but never actually applied), so our
+//      own lines are never mistaken for native "rác" (junk) lines.
+//   4. Added a live `addfeature` guard on all target sources while drawing
+//      is active, so a native stray line gets removed the instant it's
+//      created instead of waiting for the 100ms/400ms cleanup timers.
+//   5. DEBUG_MODE flag: when true, logs every feature (Layer/color/name/
+//      _editId/landType) in all target sources right after finish, so you
+//      can see exactly what the "3rd" feature is if it still appears.
 // ============================================================
 
 (function () {
     'use strict';
 
-    function log() {}
+    // Flip to true while testing to see console diagnostics.
+    const DEBUG_MODE = true;
+
+    function log(...args) {
+        if (DEBUG_MODE) console.log('[SmartDrawer]', ...args);
+    }
 
     // ===== STATE MANAGEMENT =====
     let isSmartDrawing = false;
@@ -26,6 +50,11 @@
     let mouseDownPos = null;
     let justFinishedTime = 0;
     let lastSnapInfo = { coord: null, isSnapped: false };
+
+    // Track feature IDs we created ourselves, so cleanup never guesses.
+    let ourFeatureIds = new Set();
+    // Unsubscribe functions for the live addfeature guard.
+    let guardUnsubscribers = [];
 
     function setLandTypeAndColor(type, color) {
         if (type) currentLandType = type;
@@ -290,7 +319,7 @@
                     }
                 }
             });
-        } catch (e) {}
+        } catch (e) { }
     }
 
     function restoreNativeMapInteractions(map) {
@@ -302,7 +331,7 @@
                     delete interaction.__topoDisabled;
                 }
             });
-        } catch (e) {}
+        } catch (e) { }
     }
 
     // ===== VERTEX SNAPPING UTILITY =====
@@ -368,7 +397,6 @@
     // ===== MOUSE INTERACTION HANDLERS =====
     function isUIElementClick(e) {
         if (!e || !e.target) return false;
-        // Click ngoài .ol-viewport (panel, nút UI...) → không phải click vẽ
         const viewport = document.querySelector('.ol-viewport');
         if (viewport && !viewport.contains(e.target)) return true;
         return !!(e.target.closest('#topo-checker-panel') || e.target.closest('#topo-fab-btn') || e.target.closest('.topo-area-bar'));
@@ -410,12 +438,10 @@
 
             let isFinishAction = false;
 
-            // Finish condition 1: Rapid double click (two clicks within 600ms and < 40px)
             if (activePoints.length >= 1 && timeDiff < 600 && clickDist < 40) {
                 isFinishAction = true;
             }
 
-            // Finish condition 2: Clicked on or near the last placed vertex (< 35px)
             if (!isFinishAction && activePoints.length >= 2) {
                 const lastPt = activePoints[activePoints.length - 1];
                 const lastPx = map.getPixelFromCoordinate(lastPt);
@@ -431,7 +457,6 @@
                 log('⚡ Finish condition met (Double click or clicked last vertex)! Finishing line...');
                 lastClickInfo = { time: 0, pos: null };
 
-                // Clean up duplicate point added by second click of double-click if close to last point
                 if (activePoints.length >= 2) {
                     const pLast = activePoints[activePoints.length - 1];
                     const pPrev = activePoints[activePoints.length - 2];
@@ -532,7 +557,7 @@
                     view.on('change:center', renderSmartDrawCanvas);
                     view.on('change:resolution', renderSmartDrawCanvas);
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
     }
 
@@ -547,7 +572,7 @@
         if (map) {
             try {
                 map.un('postrender', renderSmartDrawCanvas);
-            } catch (e) {}
+            } catch (e) { }
         }
     }
 
@@ -561,7 +586,7 @@
 
         function walk(layer) {
             if (typeof layer.getLayers === 'function') {
-                try { layer.getLayers().forEach(walk); } catch (e) {}
+                try { layer.getLayers().forEach(walk); } catch (e) { }
                 return;
             }
             try {
@@ -589,12 +614,12 @@
                 if (hasLineString || layerId.includes('edit') || layerId.includes('draw') || layerId.includes('main') || layerId.includes('vector')) {
                     if (!primarySource) primarySource = src;
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
 
         try {
             map.getLayers().forEach(walk);
-        } catch (e) {}
+        } catch (e) { }
 
         if (!primarySource && sources.length > 0) {
             primarySource = sources[0];
@@ -603,8 +628,6 @@
         return { primary: primarySource, sources: sources, sample: sampleLineFeature };
     }
 
-    // Lấy source trực tiếp từ Draw interaction (tin cậy hơn walk layer tree)
-    // vì App không đặt tên layer, findAllTargetLineSources có thể trả về source sai
     function getDrawInteractionSource(map) {
         if (!map) return null;
         try {
@@ -621,7 +644,7 @@
                     return inter.source_;
                 }
             }
-        } catch (e) {}
+        } catch (e) { }
         return null;
     }
 
@@ -642,7 +665,7 @@
                         if (strokeInst) StrokeClass = strokeInst.constructor;
                     }
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
 
         if (!StyleClass && map) {
@@ -662,7 +685,7 @@
                         }
                     }
                 });
-            } catch (e) {}
+            } catch (e) { }
         }
 
         if (StyleClass && StrokeClass) {
@@ -673,13 +696,13 @@
                         width: width
                     })
                 });
-            } catch (e) {}
+            } catch (e) { }
         }
 
         return null;
     }
 
-    // ===== ADD POLYLINE FEATURE WITH DYNAMICS LAND TYPE & COLOR =====
+    // ===== ADD POLYLINE FEATURE WITH DYNAMIC LAND TYPE & COLOR =====
     function addPolylineFeatureToMap(map, coords, extraProps = {}) {
         const clean = sanitizeCoords(coords);
         if (!map || !clean || clean.length < 2) return null;
@@ -687,7 +710,6 @@
         const ol = window.ol || window.openlayers;
         const { primary: layerSource, sources: allSources, sample: sampleFeature } = findAllTargetLineSources(map);
 
-        // Ưu tiên dùng source từ Draw interaction trực tiếp (chính xác hơn walk layer tree)
         const drawSource = getDrawInteractionSource(map);
         const targetSource = drawSource || layerSource;
 
@@ -696,7 +718,6 @@
             return null;
         }
 
-        // Lấy sample feature để clone constructor
         let resolvedSample = sampleFeature;
         if (!resolvedSample && drawSource) {
             const feats = drawSource.getFeatures();
@@ -705,10 +726,11 @@
 
         const activeColor = extraProps.color || currentColor || '#ffaa32';
         const strokeColor = activeColor;
+        // FIX #3: fall back to currentLandType so this is never empty/undefined,
+        // which is what let cleanup mistake our own lines for native junk.
+        const landTypeToSet = extraProps.landType || currentLandType || 'DGT';
         const featureId = generateUUID();
 
-        // Chỉ set đúng 2 properties mà native 3DG dùng: _editId + color
-        // KHÔNG set landType/Layer (3DG group select theo Layer)
         try {
             let feat = null;
             let newGeom = null;
@@ -721,7 +743,7 @@
                     try {
                         newGeom = sampleGeom.clone();
                         newGeom.setCoordinates(clean);
-                    } catch (e) {}
+                    } catch (e) { }
                 }
             }
 
@@ -731,11 +753,11 @@
                     if (LineStringClass) {
                         newGeom = new LineStringClass(clean, 'XY');
                     }
-                } catch (e) {}
+                } catch (e) { }
             }
 
             if (!newGeom && ol?.geom?.LineString) {
-                try { newGeom = new ol.geom.LineString(clean); } catch (e) {}
+                try { newGeom = new ol.geom.LineString(clean); } catch (e) { }
             }
 
             if (!newGeom) {
@@ -745,7 +767,7 @@
 
             const FeatureClass = resolvedSample?.constructor || ol?.Feature;
             if (FeatureClass) {
-                try { feat = new FeatureClass({ geometry: newGeom }); } catch (e) {}
+                try { feat = new FeatureClass({ geometry: newGeom }); } catch (e) { }
             }
 
             if (feat) {
@@ -757,6 +779,8 @@
                         feat.set('_editId', featureId);
                         feat.set('color', strokeColor);
                         feat.set('strokeColor', strokeColor);
+                        // FIX #3: actually apply landType now (was missing before).
+                        feat.set('landType', landTypeToSet);
                     }
 
                     const customStyle = createOlStyleForFeature(strokeColor, 3.5, resolvedSample, map);
@@ -773,12 +797,15 @@
                         try {
                             const ex2 = layerSource.getFeatureById ? layerSource.getFeatureById(featureId) : null;
                             if (!ex2) layerSource.addFeature(feat);
-                        } catch (e) {}
+                        } catch (e) { }
                     }
+
+                    // FIX #2: record ownership so cleanup can be exact, not guessy.
+                    ourFeatureIds.add(featureId);
                 } catch (e) { }
             }
 
-            log(`✅ Saved LineString [${featureId}] into Draw source.`);
+            log(`✅ Saved LineString [${featureId}] into Draw source. landType=${landTypeToSet}`);
             return feat;
         } catch (e) {
             console.error('[SmartDrawer] Failed to add feature to OpenLayers map source:', e);
@@ -786,39 +813,117 @@
         return null;
     }
 
+    // FIX #1 + #2: safe against non-string color values, and now prefers exact
+    // ownership check (ourFeatureIds) over fuzzy name/color/Layer matching.
+    // The fuzzy match is kept ONLY as a fallback for lines that existed before
+    // this session started (so it doesn't touch unrelated existing data).
     function cleanupNative3dgDefaultLine(map) {
         if (!map) return;
-        // Check ALL sources (not just primary) since 3DG may create BAN_VE line in a different source
         const { sources: allSources } = findAllTargetLineSources(map);
 
         allSources.forEach(source => {
             if (!source || !source.getFeatures) return;
             try {
-                const features = [...source.getFeatures()]; // Clone to avoid mutation during iteration
+                const features = [...source.getFeatures()];
                 features.forEach(f => {
+                    const geomType = f.getGeometry?.()?.getType?.();
+                    if (geomType !== 'LineString') return;
+
+                    const editId = f.get?.('_editId');
+
+                    // Ours? Never touch it.
+                    if (editId && ourFeatureIds.has(editId)) return;
+
                     const landType = f.get?.('landType');
                     const layerProp = f.get?.('Layer') || f.get?.('layer') || '';
-                    const color = f.get?.('color') || f.get?.('stroke') || '';
+                    const rawColor = f.get?.('color') || f.get?.('stroke') || '';
+                    const colorStr = typeof rawColor === 'string' ? rawColor.toLowerCase() : '';
                     const name = f.get?.('name') || '';
 
-                    // Native 3DG BAN_VE line: no landType, Layer === 'BAN_VE', gray color (#c8c8c8)
                     const isBanVeLine = !landType && (
                         layerProp === 'BAN_VE' ||
-                        color.toLowerCase() === '#c8c8c8' ||
-                        (/^Đường\s+[a-z0-9]+$/i.test(name) && !landType)
+                        colorStr === '#c8c8c8' ||
+                        (/^Đường\s+[a-z0-9]+$/i.test(name) && !landType) ||
+                        // Any untracked, un-typed LineString created while we were
+                        // actively drawing is very likely the native BAN_VE stray.
+                        (isSmartDrawing && !editId)
                     );
 
                     if (isBanVeLine) {
                         const id = f.getId?.() || '';
-                        log(`🧹 Removing native 3DG default BAN_VE line [Layer:${layerProp}] [color:${color}] [name:${name}] (${id})`);
+                        log(`🧹 Removing native/stray line [Layer:${layerProp}] [color:${rawColor}] [name:${name}] (${id})`);
                         try {
                             source.removeFeature(f);
                             if (typeof source.changed === 'function') source.changed();
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 });
-            } catch (e) {}
+            } catch (e) { }
         });
+    }
+
+    // DEBUG helper — dump every LineString feature across all target sources.
+    function debugDumpAllLineFeatures(map, label) {
+        if (!DEBUG_MODE || !map) return;
+        const { sources: allSources } = findAllTargetLineSources(map);
+        const rows = [];
+        allSources.forEach((source, si) => {
+            if (!source || !source.getFeatures) return;
+            source.getFeatures().forEach(f => {
+                const type = f.getGeometry?.()?.getType?.();
+                if (type !== 'LineString') return;
+                rows.push({
+                    sourceIndex: si,
+                    id: f.getId?.() || f.id_ || '(no id)',
+                    _editId: f.get?.('_editId') || '',
+                    isOurs: ourFeatureIds.has(f.get?.('_editId')),
+                    landType: f.get?.('landType') || '',
+                    Layer: f.get?.('Layer') || f.get?.('layer') || '',
+                    color: f.get?.('color') || f.get?.('stroke') || '',
+                    name: f.get?.('name') || '',
+                    numVertices: f.getGeometry()?.getCoordinates?.()?.length || 0
+                });
+            });
+        });
+        console.log(`[SmartDrawer][DEBUG] ${label} — ${rows.length} LineString feature(s):`);
+        console.table(rows);
+    }
+
+    // Live guard: catches a native stray line the instant it's added, instead
+    // of waiting for the post-finish cleanup timers.
+    function attachStrayLineGuards(map) {
+        detachStrayLineGuards(); // avoid duplicate listeners
+        const { sources: allSources } = findAllTargetLineSources(map);
+        allSources.forEach(source => {
+            if (!source || typeof source.on !== 'function') return;
+            const handler = (evt) => {
+                if (!isSmartDrawing) return;
+                const f = evt.feature;
+                const type = f?.getGeometry?.()?.getType?.();
+                if (type !== 'LineString') return;
+                const editId = f.get?.('_editId');
+                if (editId && ourFeatureIds.has(editId)) return; // it's ours, fine
+
+                // Give our own addFeature call a tick to register _editId /
+                // ourFeatureIds before judging this feature as stray.
+                setTimeout(() => {
+                    const stillUntracked = !editId && !f.get?.('landType');
+                    if (stillUntracked) {
+                        log('🧹 [guard] Removing stray native line added during draw session.');
+                        try { source.removeFeature(f); } catch (e) { }
+                    }
+                }, 0);
+            };
+            source.on('addfeature', handler);
+            guardUnsubscribers.push(() => {
+                try { source.un('addfeature', handler); } catch (e) { }
+            });
+        });
+    }
+
+    function detachStrayLineGuards() {
+        guardUnsubscribers.forEach(unsub => { try { unsub(); } catch (e) { } });
+        guardUnsubscribers = [];
     }
 
     // ===== ENSURE NATIVE 3DG EDIT PANEL & LINE MODE =====
@@ -889,6 +994,8 @@
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         if (!map) return;
 
+        debugDumpAllLineFeatures(map, 'BEFORE finish (baseline)');
+
         const scale = getMeterScaleFactor(cleanPoints[0]);
         const scaledDist = currentDistance * scale;
 
@@ -897,38 +1004,39 @@
             color: currentColor
         };
 
-        // Tìm Select interaction để deselect sau khi add xong
         const allInteractions = map.getInteractions().getArray();
         const selectInter = allInteractions.find(inter =>
             typeof inter.getFeatures === 'function' &&
             typeof inter.setActive === 'function'
         );
 
+        const createdThisRound = [];
+
         if (currentSide === 'both') {
-            // For 'both': only create 2 offset lines (left + right), NO center line
             ['right', 'left'].forEach(side => {
                 const dist = side === 'left' ? -scaledDist : scaledDist;
                 let offsetCoords = computeParallelOffset(cleanPoints, dist);
-                // Không snap đường offset — snap 25px khi zoom out = nhiều mét thực
-                // → endpoint offset bị snap vào endpoint gốc → 2 đường trùng thành 1
                 const cleanOffset = sanitizeCoords(offsetCoords);
                 if (cleanOffset.length >= 2) {
-                    addPolylineFeatureToMap(map, cleanOffset, extraProps);
+                    const f = addPolylineFeatureToMap(map, cleanOffset, extraProps);
+                    if (f) createdThisRound.push(f.get?.('_editId'));
                 }
             });
         } else {
-            // For 'right' or 'left': main drawn line + 1 parallel offset = 2 independent lines
-            addPolylineFeatureToMap(map, cleanPoints, extraProps);
+            const mainFeat = addPolylineFeatureToMap(map, cleanPoints, extraProps);
+            if (mainFeat) createdThisRound.push(mainFeat.get?.('_editId'));
+
             const dist = currentSide === 'left' ? -scaledDist : scaledDist;
             let offsetCoords = computeParallelOffset(cleanPoints, dist);
-            // Không snap đường offset — tránh merge 2 đường thành 1 khi zoom out
             const cleanOffset = sanitizeCoords(offsetCoords);
             if (cleanOffset.length >= 2) {
-                addPolylineFeatureToMap(map, cleanOffset, extraProps);
+                const offFeat = addPolylineFeatureToMap(map, cleanOffset, extraProps);
+                if (offFeat) createdThisRound.push(offFeat.get?.('_editId'));
             }
         }
 
-        // Deselect: dispatch 'select' event để buộc 3DG React cập nhật selection state về empty
+        log(`This round created ${createdThisRound.length} feature(s):`, createdThisRound);
+
         function forceDeselectViaEvent() {
             try {
                 if (!selectInter) return;
@@ -943,15 +1051,15 @@
                             selected: [],
                             deselected: deselected
                         });
-                    } catch(e) {}
+                    } catch (e) { }
                 }
                 map.getInteractions().forEach(inter => {
                     if (inter !== selectInter && typeof inter.getFeatures === 'function') {
-                        try { inter.getFeatures().clear(); } catch(e) {}
+                        try { inter.getFeatures().clear(); } catch (e) { }
                     }
                 });
                 map.render();
-            } catch(e) {}
+            } catch (e) { }
         }
         setTimeout(forceDeselectViaEvent, 150);
         setTimeout(forceDeselectViaEvent, 500);
@@ -960,16 +1068,15 @@
             window.dispatchEvent(new CustomEvent('topo:features-updated'));
         } catch (e) { }
 
-        // Clean up native BAN_VE line created by 3DG native draw (giữ trong setTimeout
-        // để tránh xóa trước khi feature của chúng ta được thêm vào)
         setTimeout(() => {
             cleanupNative3dgDefaultLine(map);
+            debugDumpAllLineFeatures(map, 'AFTER cleanup @100ms');
         }, 100);
         setTimeout(() => {
             cleanupNative3dgDefaultLine(map);
+            debugDumpAllLineFeatures(map, 'AFTER cleanup @400ms (final)');
         }, 400);
 
-        // Reset points for NEXT line, keeping drawer active for continuous parallel line drawing!
         activePoints = [];
         currentMouseCoord = null;
         lastClickInfo = { time: 0, pos: null };
@@ -995,6 +1102,7 @@
         currentMouseCoord = null;
         lastClickInfo = { time: 0, pos: null };
         mouseDownPos = null;
+        ourFeatureIds = new Set();
 
         currentDistance = options.distance || 5.0;
         currentSide = options.side || 'right';
@@ -1007,6 +1115,7 @@
         if (canvas) canvas.style.pointerEvents = 'none';
 
         attachEventListeners();
+        attachStrayLineGuards(map);
         clearCanvas();
 
         log(`Smart Drawer activated! Mode: [${currentLandType}], Color: [${currentColor}], Dist: [${currentDistance}m]`);
@@ -1024,6 +1133,7 @@
         mouseDownPos = null;
 
         detachEventListeners();
+        detachStrayLineGuards();
         clearCanvas();
 
         log('Smart Drawer stopped.');
@@ -1036,5 +1146,10 @@
     window.__smartDrawerSetLandType = setLandTypeAndColor;
     window.__smartDrawerSetDistance = setDistanceInMeters;
     window.__smartDrawerSetSide = setSideOption;
+    // Debug helper exposed for manual console inspection.
+    window.__smartDrawerDebugDump = function () {
+        const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
+        debugDumpAllLineFeatures(map, 'MANUAL DUMP');
+    };
 
 })();
