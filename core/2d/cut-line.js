@@ -25,9 +25,7 @@
     let mouseDownPos = null;
     let justFinishedTime = 0;
 
-    // Track feature IDs we created ourselves during splitting
-    let ourFeatureIds = new Set();
-    let guardUnsubscribers = [];
+
 
     // Cache of target sources
     let cachedSourcesResult = null;
@@ -306,111 +304,24 @@
             if (typeof newFeat.setId === 'function') newFeat.setId(newId);
             newFeat.id_ = newId;
             newFeat._id = newId;
+            newFeat.id = newId;
 
-            // Preserve landType, color, name, Layer
-            const landType = origFeature.get?.('landType') || origFeature.get?.('Layer') || 'DGT';
-            const color = origFeature.get?.('color') || origFeature.get?.('strokeColor') || (landType === 'DTL' ? '#aaffff' : '#ffaa32');
-            const origName = origFeature.get?.('name') || '';
-
-            if (typeof newFeat.set === 'function') {
-                newFeat.set('_editId', newId);
-                newFeat.set('color', color);
-                newFeat.set('strokeColor', color);
-                newFeat.set('landType', landType);
-                newFeat.set('Layer', landType);
-                if (origName) newFeat.set('name', origName);
-            }
-
-            // Copy style
+            // Preserve style
             const origStyle = origFeature.getStyle?.();
             if (origStyle) {
                 newFeat.setStyle(origStyle);
             } else {
+                const color = origFeature.get?.('color') || origFeature.get?.('strokeColor') || '#ffaa32';
                 const customStyle = createOlStyleForFeature(color, 3.5, origFeature, map);
                 if (customStyle) newFeat.setStyle(customStyle);
             }
 
-            ourFeatureIds.add(newId);
             return newFeat;
         } catch (e) {
             console.error('[CutLine] Failed to create split feature:', e);
         }
 
         return null;
-    }
-
-    // ===== CLEANUP NATIVE STRAY LINES =====
-    function cleanupNative3dgDefaultLine(map) {
-        if (!map) return;
-        const { sources: allSources } = findAllTargetLineSources(map);
-
-        allSources.forEach(source => {
-            if (!source || !source.getFeatures) return;
-            try {
-                const features = [...source.getFeatures()];
-                features.forEach(f => {
-                    const geomType = f.getGeometry?.()?.getType?.();
-                    if (geomType !== 'LineString') return;
-
-                    const editId = f.get?.('_editId');
-                    // If created by our cutting tool, never delete
-                    if (editId && ourFeatureIds.has(editId)) return;
-
-                    const landType = f.get?.('landType');
-                    const layerProp = f.get?.('Layer') || f.get?.('layer') || '';
-                    const rawColor = f.get?.('color') || f.get?.('stroke') || '';
-                    const colorStr = typeof rawColor === 'string' ? rawColor.toLowerCase() : '';
-                    const name = f.get?.('name') || '';
-
-                    // Native stray line created by 3DG draw tool
-                    const isBanVeLine = !landType && (
-                        layerProp === 'BAN_VE' ||
-                        colorStr === '#c8c8c8' ||
-                        (/^Đường\s+[a-z0-9]+$/i.test(name) && !landType) ||
-                        (isCutting && !editId)
-                    );
-
-                    if (isBanVeLine) {
-                        try {
-                            source.removeFeature(f);
-                            if (typeof source.changed === 'function') source.changed();
-                        } catch (e) { }
-                    }
-                });
-            } catch (e) { }
-        });
-    }
-
-    function attachStrayLineGuards(map) {
-        detachStrayLineGuards();
-        const { sources: allSources } = findAllTargetLineSources(map);
-        allSources.forEach(source => {
-            if (!source || typeof source.on !== 'function') return;
-            const handler = (evt) => {
-                if (!isCutting) return;
-                const f = evt.feature;
-                const type = f?.getGeometry?.()?.getType?.();
-                if (type !== 'LineString') return;
-                const editId = f.get?.('_editId');
-                if (editId && ourFeatureIds.has(editId)) return;
-
-                setTimeout(() => {
-                    const stillUntracked = !editId && !f.get?.('landType');
-                    if (stillUntracked) {
-                        try { source.removeFeature(f); } catch (e) { }
-                    }
-                }, 0);
-            };
-            source.on('addfeature', handler);
-            guardUnsubscribers.push(() => {
-                try { source.un('addfeature', handler); } catch (e) { }
-            });
-        });
-    }
-
-    function detachStrayLineGuards() {
-        guardUnsubscribers.forEach(unsub => { try { unsub(); } catch (e) { } });
-        guardUnsubscribers = [];
     }
 
     // ===== ENSURE NATIVE 3DG EDIT MODE IS "CHỌN/SỬA" (NOT DRAW) =====
@@ -909,10 +820,6 @@
             }
         }
 
-        // Clean up any native 3DG stray line that might have been created
-        setTimeout(() => cleanupNative3dgDefaultLine(map), 50);
-        setTimeout(() => cleanupNative3dgDefaultLine(map), 300);
-
         justFinishedTime = Date.now();
         activeCutPoints = [];
         lastClickInfo = { time: 0, pos: null };
@@ -1166,11 +1073,9 @@
         currentMouseCoord = null;
         lastSnapInfo = { coord: null, isSnapped: false };
         lastClickInfo = { time: 0, pos: null };
-        ourFeatureIds = new Set();
         invalidateSourcesCache();
 
         attachEventListeners();
-        attachStrayLineGuards(map);
         clearCanvas();
 
         log('Cut Line tool activated.');
@@ -1181,7 +1086,6 @@
         const map = window.__topoMap || (window.__topoFindOlMap && window.__topoFindOlMap());
         if (map) {
             restoreNativeMapInteractions(map);
-            cleanupNative3dgDefaultLine(map);
         }
 
         isCutting = false;
@@ -1192,7 +1096,6 @@
         invalidateSourcesCache();
 
         detachEventListeners();
-        detachStrayLineGuards();
         clearCanvas();
 
         log('Cut Line tool stopped.');

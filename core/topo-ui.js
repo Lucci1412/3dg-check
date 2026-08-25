@@ -17,6 +17,55 @@
     let currentErrors = [];
     let activeErrorId = null;
 
+    // ===== 2D / 3D MODE STATE & DETECTOR (MODULE SCOPE) =====
+    let currentAppMode = '2d'; // '2d' or '3d'
+
+    function detectCurrentAppMode() {
+        // 1. Kiểm tra DOM Canvas thực tế trên trang (Độ chính xác cao nhất)
+        const hasCesium = Boolean(
+            document.querySelector('canvas.cesium-widget') || 
+            document.querySelector('.cesium-viewer') || 
+            document.querySelector('.cesium-widget') ||
+            document.querySelector('canvas[data-engine="three.js"]') ||
+            window.viewer?.scene ||
+            window.__topo3dViewer
+        );
+        const hasOl = Boolean(
+            document.querySelector('.ol-viewport') || 
+            document.querySelector('.ol-unselectable')
+        );
+
+        if (hasCesium && !hasOl) {
+            return '3d';
+        }
+        if (hasOl && !hasCesium) {
+            return '2d';
+        }
+
+        // 2. Kiểm tra URL Hash, Pathname và Query Params
+        const hash = (window.location.hash || '').toLowerCase();
+        const href = (window.location.href || '').toLowerCase();
+        const path = (window.location.pathname || '').toLowerCase();
+
+        if (hash.includes('3d') || href.includes('3d') || hash.includes('mesh') || href.includes('mesh') || path.includes('3d')) {
+            return '3d';
+        }
+        if (hash.includes('tiles') || href.includes('tiles') || path.includes('tiles')) {
+            return '2d';
+        }
+
+        // 3. Kiểm tra Active Tab Link trên Header/Sidebar
+        const link3d = document.querySelector('a[href*="3d"], a[href*="mesh"], [data-mode="3d"]');
+        if (link3d && (link3d.classList.contains('bg-blue-500') || link3d.className.includes('active') || link3d.classList.contains('text-white'))) {
+            return '3d';
+        }
+
+        // 4. Nếu tồn tại bất kỳ dấu hiệu Cesium nào
+        if (hasCesium) return '3d';
+
+        return '2d';
+    }
+
     // ===== CREATE MINIMALIST UI =====
     function createUI() {
         if (document.getElementById('topo-fab-btn')) return;
@@ -41,11 +90,8 @@
                 <div class="topo-title">
                     <span class="topo-icon">🔍</span>
                     <span>Kiểm Tra Topology</span>
-                    <span class="topo-badge-premium">
-                        <svg class="topo-crown-icon" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M5 16L3 5l5.5 5L12 4l3.5 6L21 5l-2 11H5zm14 3c0 .55-.45 1-1 1H6c-.55 0-1-.45-1-1v-1h14v1z"/>
-                        </svg>
-                        PREMIUM
+                    <span id="topo-badge-mode">
+                        <span class="topo-badge-2d">2D TILES</span>
                     </span>
                 </div>
                 <div class="topo-header-actions">
@@ -200,6 +246,18 @@
         const smartDrawBtn = document.getElementById('topo-btn-smart-draw');
         const cutLineBtn = document.getElementById('topo-btn-cut-line');
 
+        // 0. Floating Action Button (Kính lúp) click to toggle panel
+        if (fab) {
+            fab.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (fab.dataset.dragging === 'true') {
+                    delete fab.dataset.dragging;
+                    return;
+                }
+                togglePanel();
+            });
+        }
+
         // 1. Minimize button (—)
         if (minimizeBtn && body) {
             minimizeBtn.addEventListener('click', (e) => {
@@ -235,6 +293,65 @@
         const areaFinishBtn = document.getElementById('topo-btn-area-finish');
         const areaConfirmBtn = document.getElementById('topo-btn-area-confirm');
         const areaCancelBtn = document.getElementById('topo-btn-area-cancel');
+
+        // ===== 2D / 3D MODE DETECTION & UI ROUTER =====
+        function updateAppModeUI() {
+            const newMode = detectCurrentAppMode();
+            const badgeEl = document.getElementById('topo-badge-mode');
+            const smartDrawEl = document.getElementById('topo-btn-smart-draw');
+            const cutLineEl = document.getElementById('topo-btn-cut-line');
+            const areaDeleteEl = document.getElementById('topo-btn-area-delete');
+
+            if (newMode !== currentAppMode) {
+                currentAppMode = newMode;
+                cancelAllInteractiveModes();
+            }
+
+            const is3d = currentAppMode === '3d';
+            if (badgeEl) {
+                if (is3d) {
+                    badgeEl.innerHTML = `<span class="topo-badge-3d">3D MESH</span>`;
+                } else {
+                    badgeEl.innerHTML = `<span class="topo-badge-2d">2D TILES</span>`;
+                }
+            }
+
+            if (smartDrawEl) smartDrawEl.style.display = is3d ? 'none' : '';
+            if (cutLineEl) cutLineEl.style.display = is3d ? 'none' : '';
+            if (areaDeleteEl) areaDeleteEl.style.display = is3d ? 'none' : '';
+        }
+
+        function initModeRouter() {
+            updateAppModeUI();
+            window.addEventListener('hashchange', updateAppModeUI);
+            window.addEventListener('popstate', updateAppModeUI);
+
+            const origPushState = history.pushState;
+            if (origPushState && !history.__topoPushStatePatched) {
+                history.__topoPushStatePatched = true;
+                history.pushState = function () {
+                    origPushState.apply(this, arguments);
+                    setTimeout(updateAppModeUI, 50);
+                };
+            }
+            const origReplaceState = history.replaceState;
+            if (origReplaceState && !history.__topoReplaceStatePatched) {
+                history.__topoReplaceStatePatched = true;
+                history.replaceState = function () {
+                    origReplaceState.apply(this, arguments);
+                    setTimeout(updateAppModeUI, 50);
+                };
+            }
+
+            setInterval(updateAppModeUI, 600);
+
+            document.addEventListener('click', (e) => {
+                const link = e.target.closest('a');
+                if (link && (link.href?.includes('3d-mesh') || link.href?.includes('tiles'))) {
+                    setTimeout(updateAppModeUI, 100);
+                }
+            }, true);
+        }
 
         let currentAreaMode = 'delete'; // 'delete', 'color', 'smart-draw', or 'cut-line'
 
@@ -303,6 +420,7 @@
 
         function setSmartDrawControlsVisible(visible) {
             const displayVal = visible ? 'flex' : 'none';
+            const lineTypeBox = document.getElementById('topo-draw-line-types');
             if (lineTypeBox) lineTypeBox.style.display = displayVal;
             if (drawDistBar) drawDistBar.style.display = displayVal;
             if (drawSideBar) drawSideBar.style.display = displayVal;
@@ -312,6 +430,7 @@
             if (window.__smartDrawerStop) window.__smartDrawerStop();
             if (window.__cutLineStop) window.__cutLineStop();
             if (window.__areaDeleterCancel) window.__areaDeleterCancel();
+            if (window.__areaColorizer3DCancel) window.__areaColorizer3DCancel();
             if (window.__areaColorizerHidePopover) window.__areaColorizerHidePopover();
             if (areaBar) areaBar.classList.add('topo-drawer-hidden');
             if (cutLineBtn) {
@@ -615,10 +734,29 @@
         if (areaColorBtn) {
             areaColorBtn.addEventListener('click', () => {
                 cancelAllInteractiveModes();
+                updateAppModeUI();
                 setUIVisibilityMode('interactive');
                 setActiveModeButton('topo-btn-area-color');
                 currentAreaMode = 'color';
                 setSmartDrawControlsVisible(false);
+
+                if (currentAppMode === '3d') {
+                    if (window.__areaColorizer3DStart) {
+                        const ok = window.__areaColorizer3DStart();
+                        if (ok && areaBar) {
+                            areaBar.classList.remove('topo-drawer-hidden');
+                            if (areaStatus) areaStatus.textContent = '🎨 Đang vẽ vùng 3D (Chọn ít nhất 3 điểm)...';
+                            if (areaFinishBtn) {
+                                areaFinishBtn.style.display = 'inline-flex';
+                                areaFinishBtn.textContent = '✓ Hoàn Thành Vùng';
+                                areaFinishBtn.disabled = true;
+                            }
+                            if (areaConfirmBtn) areaConfirmBtn.style.display = 'none';
+                        }
+                    }
+                    return;
+                }
+
                 if (window.__areaDeleterStart) {
                     const ok = window.__areaDeleterStart();
                     if (ok && areaBar) {
@@ -638,6 +776,7 @@
         if (areaDeleteBtn) {
             areaDeleteBtn.addEventListener('click', () => {
                 cancelAllInteractiveModes();
+                updateAppModeUI();
                 setUIVisibilityMode('interactive');
                 setActiveModeButton('topo-btn-area-delete');
                 currentAreaMode = 'delete';
@@ -683,6 +822,7 @@
             areaFinishBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 e.preventDefault();
+                updateAppModeUI();
                 if (currentAreaMode === 'cut-line') {
                     if (window.__cutLineFinish) window.__cutLineFinish();
                     return;
@@ -693,6 +833,30 @@
                     setActiveModeButton('topo-btn-scan');
                     return;
                 }
+
+                if (currentAppMode === '3d') {
+                    if (window.__areaColorizer3DFinish) {
+                        const selected = window.__areaColorizer3DFinish();
+                        if (selected && selected.length > 0) {
+                            areaStatus.innerHTML = `🎨 <b style="color:#0284c7">Đã quét thấy ${selected.length} nét vẽ 3D</b>. Chọn màu bên dưới:`;
+                            areaFinishBtn.style.display = 'none';
+                            areaConfirmBtn.style.display = 'inline-flex';
+                            areaConfirmBtn.textContent = `🎨 Chọn Màu (${selected.length} nét)`;
+
+                            if (window.__areaColorizerShowPopover) {
+                                window.__areaColorizerShowPopover(areaConfirmBtn, (colorHex, landCode) => {
+                                    if (window.__areaColorizer3DApply) window.__areaColorizer3DApply(colorHex, landCode);
+                                    cancelAllInteractiveModes();
+                                    setActiveModeButton('topo-btn-scan');
+                                });
+                            }
+                        } else {
+                            areaStatus.textContent = '❌ Không tìm thấy nét vẽ 3D nào trong vùng đã chọn!';
+                        }
+                    }
+                    return;
+                }
+
                 if (window.__areaDeleterFinish) {
                     const selected = window.__areaDeleterFinish();
                     if (selected && selected.length > 0) {
@@ -721,6 +885,16 @@
         // Confirm Action (Delete or Show Color Popover)
         function handleConfirmAction() {
             if (currentAreaMode === 'color') {
+                if (currentAppMode === '3d') {
+                    if (window.__areaColorizerShowPopover) {
+                        window.__areaColorizerShowPopover(areaConfirmBtn, (colorHex, landCode) => {
+                            if (window.__areaColorizer3DApply) window.__areaColorizer3DApply(colorHex, landCode);
+                            cancelAllInteractiveModes();
+                            setActiveModeButton('topo-btn-scan');
+                        });
+                    }
+                    return;
+                }
                 if (window.__areaColorizerShowPopover) {
                     window.__areaColorizerShowPopover(areaConfirmBtn);
                 }
@@ -763,6 +937,9 @@
                 }
             }
         });
+
+        // Initialize Mode Router after all handlers are defined
+        initModeRouter();
     }
 
     // ===== DRAGGABLE HELPER =====
@@ -776,7 +953,6 @@
 
         function dragMouseDown(e) {
             if (e.target.closest('.topo-header-actions')) return;
-            e.preventDefault();
 
             hasMoved = false;
             startX = e.clientX;
@@ -791,13 +967,18 @@
         }
 
         function elementDrag(e) {
-            e.preventDefault();
             const dx = Math.abs(e.clientX - startX);
             const dy = Math.abs(e.clientY - startY);
             if (dx > 4 || dy > 4) {
                 hasMoved = true;
-                if (!isFab) element.dataset.dragged = "true";
+                if (isFab) {
+                    element.dataset.dragging = "true";
+                } else {
+                    element.dataset.dragged = "true";
+                }
             }
+
+            if (!hasMoved) return;
 
             pos1 = pos3 - e.clientX;
             pos2 = pos4 - e.clientY;
@@ -822,8 +1003,10 @@
             document.removeEventListener('mouseup', closeDragElement);
             document.removeEventListener('mousemove', elementDrag);
 
-            if (isFab && !hasMoved) {
-                togglePanel();
+            if (isFab && hasMoved) {
+                setTimeout(() => {
+                    delete element.dataset.dragging;
+                }, 100);
             }
         }
     }
@@ -862,6 +1045,28 @@
         updateProgress(0, 'Đang chuẩn bị quét dữ liệu...');
 
         try {
+            if (currentAppMode === '3d') {
+                if (window.__topoRunCheck3D) {
+                    currentErrors = await window.__topoRunCheck3D({
+                        tolerance,
+                        onProgress: async (percent, statusText) => {
+                            updateProgress(percent, statusText);
+                        }
+                    });
+                    renderErrorList(currentErrors);
+
+                    if (currentErrors.length > 0) {
+                        fabBadge.textContent = currentErrors.length;
+                        fabBadge.style.display = 'flex';
+                    } else {
+                        fabBadge.style.display = 'none';
+                    }
+                } else {
+                    if (statsText) statsText.textContent = `Chưa có module quét 3D.`;
+                }
+                return;
+            }
+
             if (window.__topoRunCheck) {
                 currentErrors = await window.__topoRunCheck({
                     tolerance,
@@ -1056,6 +1261,13 @@
 
         if (window.__topoToggleHighlight) {
             window.__topoToggleHighlight(err.id, true);
+        }
+
+        if (currentAppMode === '3d') {
+            if (window.__topoZoomToError3D) {
+                window.__topoZoomToError3D(err);
+            }
+            return;
         }
 
         const defaultZoom = window.__topoConfig?.defaultZoom || 24;

@@ -7,11 +7,14 @@ document.documentElement.setAttribute('data-topo-extension-base-url', chrome.run
 const scripts = [
     'setting.js',
     'core/map-bridge.js',
-    'core/features/check-topo.js',
-    'core/features/area-delete.js',
-    'core/features/area-color.js',
-    'core/features/smart-draw.js',
-    'core/features/cut-line.js',
+    'core/2d/check-topo.js',
+    'core/2d/area-delete.js',
+    'core/2d/area-color.js',
+    'core/2d/smart-draw.js',
+    'core/2d/cut-line.js',
+    'core/3d/bridge-3d.js',
+    'core/3d/check-topo.js',
+    'core/3d/area-color.js',
     'core/topo-ui.js'
 ];
 

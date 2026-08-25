@@ -457,48 +457,40 @@
         // Transform EPSG:3857 coordinates to WGS84 EPSG:4326 [lon, lat] for GeoJSON file export/import standard
         const lonLatCoords = Array.isArray(coords[0]) ? coords.map(pt => transformToLonLat(pt)) : transformToLonLat(coords);
 
-        const landType = (olFeature && typeof olFeature.get === 'function' && olFeature.get('landType')) || geojsonFeature?.properties?.landType || 'DGT';
-        const strokeColor = (olFeature && typeof olFeature.get === 'function' && olFeature.get('color')) || geojsonFeature?.properties?.color || (landType === 'DTL' ? '#aaffff' : '#ffaa32');
-        const featureName = (olFeature && typeof olFeature.get === 'function' && olFeature.get('name') && !olFeature.get('name').includes('Đất công trình'))
-            ? olFeature.get('name')
+        const existingProps = (olFeature && typeof olFeature.getProperties === 'function')
+            ? olFeature.getProperties()
+            : (geojsonFeature?.properties || {});
+
+        const landType = existingProps.landType || existingProps.Layer || 'DGT';
+        const strokeColor = existingProps.color || existingProps.strokeColor || existingProps.stroke || (landType === 'DTL' ? '#aaffff' : '#ffaa32');
+        const featureName = (existingProps.name && !existingProps.name.includes('Đất công trình'))
+            ? existingProps.name
             : (landType === 'DTL' ? `Sông ${featureId.slice(0, 4)}` : `Đường ${featureId.slice(0, 4)}`);
-        const ogrStyle = `PEN(c:${strokeColor.toUpperCase()},w:2px)`;
 
-        const nativeProperties = {
-            color: strokeColor,
-            strokeColor: strokeColor,
-            stroke: strokeColor,
-            fill: strokeColor,
-            landType: landType,
-            Layer: landType,
-            OGR_STYLE: ogrStyle,
-            name: featureName
-        };
+        // Clean properties dictionary: preserve existing properties only, do not inject junk keys
+        const cleanProperties = Object.assign({}, existingProps);
+        delete cleanProperties.geometry;
 
-        // Ensure unique outer ID and vector properties are saved on olFeature so 3DG retains visual color & GeoJSON export integrity
+        if (!cleanProperties.name) {
+            cleanProperties.name = featureName;
+        }
+
+        // Ensure unique outer ID is saved on olFeature so 3DG retains identity without polluting attribute table
         if (olFeature) {
             if (typeof olFeature.setId === 'function') olFeature.setId(featureId);
             olFeature.id_ = featureId;
             olFeature._id = featureId;
             olFeature.id = featureId;
 
-            if (typeof olFeature.set === 'function') {
-                olFeature.set('color', strokeColor);
-                olFeature.set('strokeColor', strokeColor);
-                olFeature.set('stroke', strokeColor);
-                olFeature.set('fill', strokeColor);
-                olFeature.set('landType', landType);
-                olFeature.set('Layer', landType);
-                olFeature.set('OGR_STYLE', ogrStyle);
+            // Only set name if missing
+            if (typeof olFeature.set === 'function' && !olFeature.get?.('name')) {
                 olFeature.set('name', featureName);
             }
-            if (typeof olFeature.setId === 'function') olFeature.setId(featureId);
         }
 
         if (geojsonFeature) {
             geojsonFeature.id = featureId;
-            // Preserve existing properties and merge, so unique `name` is not lost
-            geojsonFeature.properties = Object.assign({}, geojsonFeature.properties || {}, nativeProperties);
+            geojsonFeature.properties = cleanProperties;
         }
 
         const geojsonFeatureObject = {
@@ -508,7 +500,7 @@
                 type: 'LineString',
                 coordinates: lonLatCoords
             },
-            properties: nativeProperties
+            properties: cleanProperties
         };
 
         const groupObject = {

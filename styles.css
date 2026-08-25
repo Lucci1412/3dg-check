@@ -146,6 +146,44 @@
     filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.2));
 }
 
+.topo-badge-3d {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2.5px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #ffffff;
+    background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+    border-radius: 12px;
+    box-shadow: 0 2px 5px rgba(2, 132, 199, 0.35);
+    line-height: 1;
+    user-select: none;
+    margin-left: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
+.topo-badge-2d {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2.5px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #ffffff;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    border-radius: 12px;
+    box-shadow: 0 2px 5px rgba(16, 185, 129, 0.35);
+    line-height: 1;
+    user-select: none;
+    margin-left: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+}
+
 @keyframes topoShimmer {
     0%, 100% {
         box-shadow: 0 2px 5px rgba(217, 119, 6, 0.35);

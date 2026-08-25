@@ -1,4 +1,4 @@
-﻿# 3DG Map Topology Checker - Chrome Extension V3
+# 3DG Map Topology Checker - Chrome Extension V3
 
 Tien ich Chrome danh rieng cho **3dg.vn**, ho tro kiem tra loi topology, ve duong song song thong minh, doi mau vung va xoa nhanh theo vung.
 
@@ -34,12 +34,19 @@ Tien ich Chrome danh rieng cho **3dg.vn**, ho tro kiem tra loi topology, ve duon
 
 ```
 content.js (MAIN world inject)
-  +- map-bridge.js    <- tim ol.Map qua React Fiber, expose window.__topoMap
-  +- check-topo.js    <- kiem tra topology
-  +- smart-draw.js    <- ve duong/song song song
-  +- area-color.js    <- doi mau vung
-  +- area-delete.js   <- xoa vung
-  +- topo-ui.js       <- panel UI, FAB button
+  +- setting.js
+  +- map-bridge.js        <- tim ol.Map qua React Fiber, expose window.__topoMap
+  +- 2d/                  <- Tinh nang 2D Tiles
+  |    +- check-topo.js   <- kiem tra topology 2D
+  |    +- smart-draw.js   <- ve duong/song song song 2D
+  |    +- cut-line.js     <- cat net ve 2D
+  |    +- area-color.js   <- doi mau vung 2D
+  |    +- area-delete.js  <- xoa vung 2D
+  +- 3d/                  <- Tinh nang 3D Mesh
+  |    +- bridge-3d.js    <- bridge ket noi viewer/scene 3D
+  |    +- check-topo.js   <- kiem tra topology 3D
+  |    +- area-color.js   <- doi mau vung 3D
+  +- topo-ui.js           <- panel UI, FAB button, auto-detect 2D/3D Mode Router
 ```
 
 ### smart-draw.js - Luong hoat dong
